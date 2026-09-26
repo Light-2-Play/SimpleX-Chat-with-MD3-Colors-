@@ -434,29 +434,62 @@ fun bindCamera(previewView: PreviewView) {
             coroutineScope.launch {
                 zoomAnim.animateTo(
                     targetValue = targetRatio,
-                    animationSpec = tween(
-                        durationMillis = 260,
-                        easing = FastOutSlowInEasing
-                    )
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
                 ) {
                     currentCamera?.cameraControl?.setZoomRatio(this.value)
                 }
             }
         }
 
-        Column(
+        var cachedPreviewView by remember { mutableStateOf<PreviewView?>(null) }
+
+        // КОРНЕВОЙ КОНТЕЙНЕР ЭКРАНА (Используем Box для правильного наложения)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            var cachedPreviewView by remember { mutableStateOf<PreviewView?>(null) }
+                .background(Color.Black)
+        ) { // 1. Открываем Root Box
 
-            // Верхняя панель (Кнопка закрытия)
+            // 1. Видоискатель (строго по центру)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 44.dp, start = 16.dp, bottom = 12.dp)
+                    .aspectRatio(if (selectedAspectRatio == "1:1") 1f else 3f / 4f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.DarkGray)
+                    .align(Alignment.Center)
+                    .pointerInput(currentCamera, minZoomRatio, maxZoomRatio) {
+                        detectTransformGestures { _, _, zoom, _ ->
+                            currentCamera?.let { cam ->
+                                val current = cam.cameraInfo.zoomState.value?.zoomRatio ?: 1.0f
+                                val target = (current * zoom).coerceIn(minZoomRatio, maxZoomRatio)
+                                cam.cameraControl.setZoomRatio(target)
+                            }
+                        }
+                    }
+            ) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            cachedPreviewView = this
+                        }
+                    }
+                )
+            }
+
+            // 2. Верхняя панель (Кнопка закрытия)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .padding(top = 44.dp, start = 16.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -473,88 +506,52 @@ fun bindCamera(previewView: PreviewView) {
                 }
             }
 
-            // Видоискатель (динамически переключается между 4:3 и 1:1)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(if (selectedAspectRatio == "1:1") 1f else 3f / 4f)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color.DarkGray)
-                    .pointerInput(currentCamera, minZoomRatio, maxZoomRatio) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            currentCamera?.let { cam ->
-                                val current = cam.cameraInfo.zoomState.value?.zoomRatio ?: 1.0f
-                                val target = (current * zoom).coerceIn(minZoomRatio, maxZoomRatio)
-                                cam.cameraControl.setZoomRatio(target)
-                            }
-                        }
-                    }
-            ) {
-         AndroidView(
-    modifier = Modifier.fillMaxSize(),
-    factory = { ctx ->
-        PreviewView(ctx).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            scaleType = PreviewView.ScaleType.FILL_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            cachedPreviewView = this
-        }
-    }
-)
-}
-    update = { previewView ->
-        previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
-    }
-            }   
-                // ВОТ СЮДА ВСТАВЛЯЕТСЯ ТАЙМЕР:
-                if (isRecordingVideo) {
-                    val minutes = recordingTimeSeconds / 60
-                    val seconds = recordingTimeSeconds % 60
-                    val timeFormatted = String.format("%02d:%02d / 02:00", minutes, seconds)
+            // 3. Таймер записи видео
+            if (isRecordingVideo) {
+                val minutes = recordingTimeSeconds / 60
+                val seconds = recordingTimeSeconds % 60
+                val timeFormatted = String.format("%02d:%02d / 02:00", minutes, seconds)
 
-                    Row(
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 44.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 16.dp)
-                            .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(Color.Red, CircleShape)
+                            .size(10.dp)
+                            .background(Color.Red, CircleShape)
+                    )
+                    BasicText(
+                        text = timeFormatted,
+                        style = TextStyle(
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        BasicText(
-                            text = timeFormatted,
-                            style = TextStyle(
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    }
+                    )
                 }
             }
 
-           // Нижняя панель управления
+            // 4. Нижняя панель управления
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomCenter) // <--- ВОТ ЗДЕСЬ (вместо .weight(1f))
+                    .align(Alignment.BottomCenter)
                     .padding(bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceEvenly
-            ) {
+            ) { // 2. Открываем Column
+
                 // Ряд: [Выбор 4:3 / 1:1] — [Объективы] — [Кнопка Луна]
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 28.dp),
+                        .padding(horizontal = 28.dp, bottom = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     // Переключатель соотношения сторон слева
@@ -598,9 +595,7 @@ fun bindCamera(previewView: PreviewView) {
                                             if (isSelected) monetAccent else Color.Transparent,
                                             CircleShape
                                         )
-                                        .clickable {
-                                            onSelectLens(ratio)
-                                        },
+                                        .clickable { onSelectLens(ratio) },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     BasicText(
@@ -635,30 +630,15 @@ fun bindCamera(previewView: PreviewView) {
                         Canvas(modifier = Modifier.size(18.dp)) {
                             val path = Path().apply {
                                 moveTo(size.width * 0.75f, size.height * 0.15f)
-                                cubicTo(
-                                    size.width * 0.35f, size.height * 0.15f,
-                                    size.width * 0.15f, size.height * 0.45f,
-                                    size.width * 0.25f, size.height * 0.85f
-                                )
-                                cubicTo(
-                                    size.width * 0.55f, size.height * 1.05f,
-                                    size.width * 0.95f, size.height * 0.85f,
-                                    size.width * 0.95f, size.height * 0.65f
-                                )
-                                cubicTo(
-                                    size.width * 0.65f, size.height * 0.70f,
-                                    size.width * 0.55f, size.height * 0.35f,
-                                    size.width * 0.75f, size.height * 0.15f
-                                )
+                                cubicTo(size.width * 0.35f, size.height * 0.15f, size.width * 0.15f, size.height * 0.45f, size.width * 0.25f, size.height * 0.85f)
+                                cubicTo(size.width * 0.55f, size.height * 1.05f, size.width * 0.95f, size.height * 0.85f, size.width * 0.95f, size.height * 0.65f)
+                                cubicTo(size.width * 0.65f, size.height * 0.70f, size.width * 0.55f, size.height * 0.35f, size.width * 0.75f, size.height * 0.15f)
                                 close()
                             }
-                            drawPath(
-                                path = path,
-                                color = if (isNightSightActive) Color.Black else monetAccentSoft
-                            )
+                            drawPath(path = path, color = if (isNightSightActive) Color.Black else monetAccentSoft)
                         }
                     }
-                }
+                } // Закрывает Box ряда пресетов
 
                 // Нижний ряд: [Спейсер] — [Затвор] — [Переворот камеры]
                 Row(
@@ -681,37 +661,32 @@ fun bindCamera(previewView: PreviewView) {
                                 if (isRecordingVideo) RoundedCornerShape(8.dp) else CircleShape
                             )
                             .pointerInput(currentImageCapture, currentVideoCapture) {
-    detectTapGestures(
-        onPress = {
-            val timerJob = coroutineScope.launch {
-                delay(350)
-                currentVideoCapture?.let { vc ->
-                    // Начинаем запись только если она еще не идет
-                    if (activeRecording == null) {
-                        startVideoRecording(vc)
-                    }
-                }
-            }
+                                detectTapGestures(
+                                    onPress = {
+                                        val timerJob = coroutineScope.launch {
+                                            delay(350)
+                                            currentVideoCapture?.let { vc ->
+                                                if (activeRecording == null) {
+                                                    startVideoRecording(vc)
+                                                }
+                                            }
+                                        }
 
-            // Ждем отпускания пальца
-            val released = tryAwaitRelease()
-            // Отменяем таймер (если держали меньше 350мс — запись не начнется)
-            timerJob.cancel()
+                                        val released = tryAwaitRelease()
+                                        timerJob.cancel()
 
-            // ПРОВЕРЯЕМ РЕАЛЬНОЕ СОСТОЯНИЕ ЗАПИСИ (activeRecording):
-            if (activeRecording != null || isRecordingVideo) {
-                // Если запись реально началась — останавливаем ее
-                stopVideoRecording()
-            } else if (released) {
-                // Фото делаем ТОЛЬКО если запись точно НЕ начиналась!
-                currentImageCapture?.let { capture ->
-                    takePhoto(capture, onImageCaptured, onError)
-                }
-            }
-        }
-    )
-}
-)                            
+                                        if (activeRecording != null || isRecordingVideo) {
+                                            stopVideoRecording()
+                                        } else if (released) {
+                                            currentImageCapture?.let { capture ->
+                                                takePhoto(capture, onImageCaptured, onError)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                    ) // Закрывает Box затвора
+
                     // Переворот камеры
                     Box(
                         modifier = Modifier
@@ -737,42 +712,42 @@ fun bindCamera(previewView: PreviewView) {
                             )
                         }
                     }
+                } // Закрывает Row нижнего ряда
+            } // Закрывает Column нижней панели
+        } // Закрывает корневой Box экрана
+    } // Закрывает @Composable CameraScreen
+
+    private fun takePhoto(
+        imageCapture: ImageCapture,
+        onSuccess: () -> Unit,
+        onError: (ImageCaptureException) -> Unit
+    ) {
+        val photoFile = File(cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+        imageCapture.takePicture(
+            outputOptions,
+            cameraExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    val authority = "${packageName}.provider"
+                    val resultUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
+
+                    val resultIntent = Intent().apply {
+                        data = resultUri
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    setResult(Activity.RESULT_OK, resultIntent)
+                    runOnUiThread {
+                        onSuccess()
+                        finish()
+                    }
+                }
+
+                override fun onError(exc: ImageCaptureException) {
+                    runOnUiThread { onError(exc) }
                 }
             }
-        }
+        )
     }
-
-   private fun takePhoto(
-    imageCapture: ImageCapture,
-    onSuccess: () -> Unit,
-    onError: (ImageCaptureException) -> Unit
-) {
-    // Камера сама создает файл в кэше
-    val photoFile = File(context.cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
-    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-    imageCapture.takePicture(
-        outputOptions,
-        cameraExecutor,
-        object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                val authority = "${context.packageName}.provider"
-                val resultUri = FileProvider.getUriForFile(context, authority, photoFile)
-                
-                val resultIntent = Intent().apply {
-                    data = resultUri
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                setResult(Activity.RESULT_OK, resultIntent)
-                runOnUiThread {
-                    onSuccess()
-                    finish()
-                }
-            }
-
-            override fun onError(exc: ImageCaptureException) {
-                runOnUiThread { onError(exc) }
-            }
-        }
-    )
-}
+} // Самая последняя скобка класса CameraActivity
