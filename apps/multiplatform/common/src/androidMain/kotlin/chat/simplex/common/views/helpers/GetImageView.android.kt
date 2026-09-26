@@ -60,9 +60,9 @@ return Intent(context, Class.forName("chat.simplex.app.CameraActivity"))
   ): SynchronousResult<Uri?>? = null
 
   override fun parseResult(resultCode: Int, intent: Intent?): Uri? {
-    return if (resultCode == Activity.RESULT_OK) {
-        intent?.data ?: uri // Приоритет отдается видеофайлу из CameraActivity!
-    } else null
+    if (resultCode != Activity.RESULT_OK) return null
+    // Если активити вернула свой файл (наше видео или фото в intent.data) — берем его!
+    return intent?.data ?: uri
 }
 
   companion object {
