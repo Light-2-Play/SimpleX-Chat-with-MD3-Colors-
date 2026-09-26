@@ -259,13 +259,11 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                     .requireLensFacing(lensFacing)
                     .build()
 
-                val fpsRange = android.util.Range(30, 30)
-
                 // 1. Превью (видоискатель)
                 val previewBuilder = Preview.Builder()
                 val camera2Preview = Camera2Interop.Extender(previewBuilder)
-                camera2Preview.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
 
+                // Оптическая стабилизация для основной камеры
                 if (lensFacing == CameraSelector.LENS_FACING_BACK) {
                     camera2Preview.setCaptureRequestOption(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
@@ -273,6 +271,7 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                     )
                 }
 
+                // Настройки превью в ночном режиме
                 if (isNightSightActive) {
                     camera2Preview.setCaptureRequestOption(
                         CaptureRequest.NOISE_REDUCTION_MODE,
@@ -284,12 +283,11 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-                // 2. Фотозахват
+                // 2. Фотозахват (максимальное качество)
                 val captureBuilder = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
 
                 val camera2Capture = Camera2Interop.Extender(captureBuilder)
-                camera2Capture.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
 
                 if (lensFacing == CameraSelector.LENS_FACING_BACK) {
                     camera2Capture.setCaptureRequestOption(
@@ -320,27 +318,30 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                 val imageCapture = captureBuilder.build()
                 currentImageCapture = imageCapture
 
-                // 3. Видеозахват (720p HD)
+                // 3. Видеозахват (720p HD, энкодер работает в фоне на cameraExecutor)
                 val qualitySelector = QualitySelector.from(
                     Quality.HD,
                     FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
                 )
                 val recorder = Recorder.Builder()
                     .setQualitySelector(qualitySelector)
-                    .setExecutor(ContextCompat.getMainExecutor(context))
+                    .setExecutor(cameraExecutor)
                     .build()
 
                 val videoCapture = VideoCapture.withOutput(recorder)
                 currentVideoCapture = videoCapture
 
-                // 4. Единый ViewPort: кропит видоискатель, фото и видео под 4:3 или 1:1
+                // 4. Единый ViewPort под 4:3 или 1:1
                 val targetRational = if (selectedAspectRatio == "1:1") {
                     android.util.Rational(1, 1)
                 } else {
-                    android.util.Rational(3, 4) // В портретной ориентации 4:3 соответствует пропорции 3:4
+                    android.util.Rational(3, 4)
                 }
 
-               val rotation = previewView.display?.rotation ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation ?: android.view.Surface.ROTATION_0
+                val rotation = previewView.display?.rotation 
+                    ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation 
+                    ?: android.view.Surface.ROTATION_0
+
                 val viewPort = androidx.camera.core.ViewPort.Builder(targetRational, rotation)
                     .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
                     .build()
@@ -352,13 +353,8 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                     .addUseCase(videoCapture)
                     .build()
 
-                try {
-                    cameraProvider.unbindAll()
-                    val camera = cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        baseSelector,
-                        useCaseGroup
-                    )
+                // Хелпер для подписки на зум и выставления экспозиции
+                fun configureActiveCamera(camera: androidx.camera.core.Camera) {
                     currentCamera = camera
 
                     camera.cameraInfo.zoomState.observe(lifecycleOwner) { state ->
@@ -376,8 +372,31 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                         }
                         camera.cameraControl.setExposureCompensationIndex(targetIndex)
                     }
+                }
+
+                try {
+                    cameraProvider.unbindAll()
+                    val camera = cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        baseSelector,
+                        useCaseGroup
+                    )
+                    configureActiveCamera(camera)
                 } catch (e: Exception) {
-                    android.util.Log.e("CameraActivity", "Error binding camera with ViewPort", e)
+                    android.util.Log.e("CameraActivity", "Error binding with ViewPort, falling back to direct binding", e)
+                    try {
+                        // Резервный запуск без кастомного ViewPort, если HAL отклонил связку
+                        val camera = cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            baseSelector,
+                            preview,
+                            imageCapture,
+                            videoCapture
+                        )
+                        configureActiveCamera(camera)
+                    } catch (fatal: Exception) {
+                        android.util.Log.e("CameraActivity", "Fatal camera binding error", fatal)
+                    }
                 }
             }, ContextCompat.getMainExecutor(context))
         }
