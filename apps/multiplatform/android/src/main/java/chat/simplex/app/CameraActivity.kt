@@ -89,7 +89,6 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
 
     // Объявляем на уровне класса:
     private var activeRecording: Recording? = null
-    private var cachedPreviewView by mutableStateOf<PreviewView?>(null)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     
     private var outputUri: Uri? = null
@@ -107,15 +106,6 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        outputUri = intent.getParcelableExtra(MediaStore.EXTRA_OUTPUT)
-
-        if (outputUri == null) {
-            setResult(Activity.RESULT_CANCELED)
-            finish()
-            return
-        }
-
 
         val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -161,6 +151,7 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
         onError: (ImageCaptureException) -> Unit,
         onClose: () -> Unit
     ) {
+        var cachedPreviewView by remember { mutableStateOf<PreviewView?>(null) }
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
         val coroutineScope = rememberCoroutineScope()
@@ -235,16 +226,16 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                             stopVideoRecording()
                         }
                     }
-                    is VideoRecordEvent.Finalize -> {
+                   is VideoRecordEvent.Finalize -> {
                         isRecordingVideo = false
                         recordingTimeSeconds = 0
                         if (!event.hasError()) {
-                            // SimpleX работает с видео через прямой путь к файлу на диске
-                            val videoUri = Uri.fromFile(videoFile)
+                            val authority = "${context.packageName}.provider"
+                            // Обязательно возвращаем URI через FileProvider, чтобы SimpleX его "съел"
+                            val videoUri = FileProvider.getUriForFile(context, authority, videoFile)
 
                             val resultIntent = Intent().apply {
                                 data = videoUri
-                                putExtra(MediaStore.EXTRA_OUTPUT, videoUri)
                                 putExtra("IS_VIDEO", true)
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
@@ -481,25 +472,25 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                         }
                     }
             ) {
-               AndroidView(
-    modifier = Modifier.fillMaxSize(),
-    factory = { ctx ->
-        PreviewView(ctx).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            scaleType = PreviewView.ScaleType.FIT_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+               factory = { ctx ->
+    PreviewView(ctx).apply {
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        scaleType = PreviewView.ScaleType.FIT_CENTER
+        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
 
-            // Передаем ссылку СРАЗУ, без post:
+        // Это толкнет Compose State строго ПОСЛЕ того, как View прикрепится к окну
+        post {
             cachedPreviewView = this
         }
-    },
+    }
+}
     update = { previewView ->
         previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
     }
-)
+            }   
                 // ВОТ СЮДА ВСТАВЛЯЕТСЯ ТАЙМЕР:
                 if (isRecordingVideo) {
                     val minutes = recordingTimeSeconds / 60
@@ -734,48 +725,36 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
     }
 
    private fun takePhoto(
-        imageCapture: ImageCapture,
-        onSuccess: () -> Unit,
-        onError: (ImageCaptureException) -> Unit
-    ) {
-        val uri = outputUri ?: run {
-            onError(ImageCaptureException(ImageCapture.ERROR_FILE_IO, "Target URI is null", null))
-            return
-        }
+    imageCapture: ImageCapture,
+    onSuccess: () -> Unit,
+    onError: (ImageCaptureException) -> Unit
+) {
+    // Камера сама создает файл в кэше
+    val photoFile = File(context.cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
+    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-        val outputStream = try {
-            contentResolver.openOutputStream(uri)
-        } catch (e: Exception) {
-            onError(ImageCaptureException(ImageCapture.ERROR_FILE_IO, "Cannot open output stream", e))
-            return
-        } ?: run {
-            onError(ImageCaptureException(ImageCapture.ERROR_FILE_IO, "Output stream is null", null))
-            return
-        }
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(outputStream).build()
-
-        imageCapture.takePicture(
-            outputOptions,
-            cameraExecutor,
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-    val resultIntent = Intent().apply {
-        data = uri
-        putExtra(MediaStore.EXTRA_OUTPUT, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    setResult(Activity.RESULT_OK, resultIntent)
-    runOnUiThread { 
-        onSuccess()
-        finish() // <--- Закрывает CameraActivity и возвращает управление в чат
-    }
-}
-
-                override fun onError(exc: ImageCaptureException) {
-                    runOnUiThread { onError(exc) }
+    imageCapture.takePicture(
+        outputOptions,
+        cameraExecutor,
+        object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                val authority = "${context.packageName}.provider"
+                val resultUri = FileProvider.getUriForFile(context, authority, photoFile)
+                
+                val resultIntent = Intent().apply {
+                    data = resultUri
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                setResult(Activity.RESULT_OK, resultIntent)
+                runOnUiThread {
+                    onSuccess()
+                    finish()
                 }
             }
-        )
-    }
+
+            override fun onError(exc: ImageCaptureException) {
+                runOnUiThread { onError(exc) }
+            }
+        }
+    )
 }
