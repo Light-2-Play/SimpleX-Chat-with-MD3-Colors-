@@ -21,22 +21,18 @@ actual fun AttachmentSelection(
   processPickedFile: (URI?, String?) -> Unit,
   processPickedMedia: (List<URI>, String?) -> Unit
 ) {
-  val actualCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-    if (result.resultCode == android.app.Activity.RESULT_OK) {
-        val uri = result.data?.data
-        if (uri != null) {
-            processPickedMedia(listOf(uri.toURI()), null)
-        }
+  val cameraLauncher = rememberCameraLauncher { uri: Uri? ->
+    if (uri != null) {
+      processPickedMedia(listOf(uri.toURI()), null)
     }
-}
+  }
   val cameraPermissionLauncher = rememberPermissionLauncher { isGranted: Boolean ->
     if (isGranted) {
-        val intent = android.content.Intent(androidAppContext, chat.simplex.app.CameraActivity::class.java)
-        actualCameraLauncher.launch(intent)
+      cameraLauncher.launchWithFallback()
     } else {
-        showToast(generalGetString(MR.strings.toast_permission_denied))
+      showToast(generalGetString(MR.strings.toast_permission_denied))
     }
-}
+  }
   val galleryImageLauncher = rememberLauncherForActivityResult(contract = PickMultipleImagesFromGallery()) { processPickedMedia(it.map { it.toURI() }, null) }
   val galleryImageLauncherFallback = rememberGetMultipleContentsLauncher { processPickedMedia(it.map { it.toURI() }, null) }
   val galleryVideoLauncher = rememberLauncherForActivityResult(contract = PickMultipleVideosFromGallery()) { processPickedMedia(it.map { it.toURI() }, null) }
@@ -47,8 +43,7 @@ actual fun AttachmentSelection(
       AttachmentOption.CameraPhoto -> {
         when (PackageManager.PERMISSION_GRANTED) {
           ContextCompat.checkSelfPermission(androidAppContext, Manifest.permission.CAMERA) -> {
-              val intent = android.content.Intent(androidAppContext, chat.simplex.app.CameraActivity::class.java)
-              actualCameraLauncher.launch(intent)
+            cameraLauncher.launchWithFallback()
           }
           else -> {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
