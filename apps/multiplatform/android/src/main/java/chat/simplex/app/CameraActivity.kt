@@ -85,9 +85,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
-class CameraActivity : ComponentActivity() {
+class CameraActivity : ComponentActivity() { // или AppCompatActivity
 
-    private lateinit var cameraExecutor: ExecutorService
+    // Объявляем на уровне класса:
+    private var activeRecording: Recording? = null
+    private var cachedPreviewView by mutableStateOf<PreviewView?>(null)
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    
     private var outputUri: Uri? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -112,7 +116,6 @@ class CameraActivity : ComponentActivity() {
             return
         }
 
-        cameraExecutor = Executors.newSingleThreadExecutor()
 
         val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -169,15 +172,11 @@ class CameraActivity : ComponentActivity() {
         var currentCamera by remember { mutableStateOf<Camera?>(null) }
         var currentImageCapture by remember { mutableStateOf<ImageCapture?>(null) }
         var currentVideoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
-        var activeRecording by remember { mutableStateOf<Recording?>(null) }
         var isRecordingVideo by remember { mutableStateOf(false) }
 
        var minZoomRatio by remember { mutableStateOf(1.0f) }
         var maxZoomRatio by remember { mutableStateOf(1.0f) }
         var currentZoomRatio by remember { mutableStateOf(1.0f) }
-
-// Вместо: private var cachedPreviewView: PreviewView? = null
-private var cachedPreviewView by mutableStateOf<PreviewView?>(null)
 
         // Токены темы Monet
         val monetAccent = remember(context) {
