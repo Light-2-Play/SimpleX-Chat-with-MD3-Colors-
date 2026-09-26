@@ -14,6 +14,8 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
+import android.util.Rational
+import android.view.Surface
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,6 +29,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.extensions.ExtensionMode
 import androidx.camera.extensions.ExtensionsManager
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -78,12 +82,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import android.util.Rational
-import androidx.camera.core.UseCaseGroup
-import androidx.camera.core.ViewPort
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 
 class CameraActivity : ComponentActivity() { // или AppCompatActivity
 
@@ -249,7 +247,8 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
             } // закрывает pending.start { ... }
         } // закрывает fun startVideoRecording
 
-        fun bindCamera(previewView: PreviewView) {
+        @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+fun bindCamera(previewView: PreviewView) {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
             cameraProviderFuture.addListener({
@@ -491,20 +490,20 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                         }
                     }
             ) {
-               factory = { ctx ->
-    PreviewView(ctx).apply {
-        layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        scaleType = PreviewView.ScaleType.FIT_CENTER
-        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-
-        // Это толкнет Compose State строго ПОСЛЕ того, как View прикрепится к окну
-        post {
+         AndroidView(
+    modifier = Modifier.fillMaxSize(),
+    factory = { ctx ->
+        PreviewView(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             cachedPreviewView = this
         }
     }
+)
 }
     update = { previewView ->
         previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
@@ -542,11 +541,11 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
                 }
             }
 
-            // Нижняя панель управления
+           // Нижняя панель управления
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .align(Alignment.BottomCenter) // <--- ВОТ ЗДЕСЬ (вместо .weight(1f))
                     .padding(bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceEvenly
