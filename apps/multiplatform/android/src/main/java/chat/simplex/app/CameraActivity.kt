@@ -441,8 +441,6 @@ fun bindCamera(previewView: PreviewView) {
             }
         }
 
-        var cachedPreviewView by remember { mutableStateOf<PreviewView?>(null) }
-
         // КОРНЕВОЙ КОНТЕЙНЕР ЭКРАНА (Используем Box для правильного наложения)
         Box(
             modifier = Modifier
@@ -550,9 +548,9 @@ fun bindCamera(previewView: PreviewView) {
                 // Ряд: [Выбор 4:3 / 1:1] — [Объективы] — [Кнопка Луна]
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 28.dp, bottom = 16.dp),
-                    contentAlignment = Alignment.Center
+        .fillMaxWidth()
+        .padding(start = 28.dp, end = 28.dp, bottom = 16.dp),
+    contentAlignment = Alignment.Center
                 ) {
                     // Переключатель соотношения сторон слева
                     Box(
