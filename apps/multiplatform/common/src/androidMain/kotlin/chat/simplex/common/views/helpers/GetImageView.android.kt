@@ -61,8 +61,7 @@ return Intent(context, Class.forName("chat.simplex.app.CameraActivity"))
 
   override fun parseResult(resultCode: Int, intent: Intent?): Uri? {
     if (resultCode != Activity.RESULT_OK) return null
-    // Если активити вернула свой файл (наше видео или фото в intent.data) — берем его!
-    return intent?.data ?: uri
+    return intent?.data ?: uri // <--- intent?.data возвращает наш .mp4 файл
 }
 
   companion object {
