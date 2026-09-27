@@ -842,6 +842,14 @@ fun bindCamera(previewView: PreviewView) {
             }
         }
 
+// Состояние включения фонарика
+var isTorchOn by remember { mutableStateOf(false) }
+
+// Проверка: есть ли у текущей активной камеры физическая вспышка
+val hasFlashUnit = remember(camera) {
+    camera?.cameraInfo?.hasFlashUnit() == true
+}
+        
         if (isNightMode && camera != null) {
             scope.launch {
                 try {
