@@ -852,11 +852,12 @@ fun bindCamera(previewView: PreviewView) {
                             style = Stroke(width = 2.5f.dp.toPx(), cap = StrokeCap.Round)
                         )
                     }
-                }
+                } // Закрывает Canvas переворота камеры
             } // Закрывает Row нижнего ряда
         } // Закрывает Column нижней панели
-    } // Закрывает функцию CameraScreen
-
+    } // Закрывает Box экрана
+} // Закрывает функцию CameraScreen <--- УБЕДИТЕСЬ, ЧТО ЗДЕСЬ ЕСТЬ ЭТА СКОБКА
+    
     // Функция сохранения фото теперь снаружи (как положено)
     private fun takePhoto(
         imageCapture: ImageCapture,
