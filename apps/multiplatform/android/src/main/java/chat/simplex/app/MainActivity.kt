@@ -1,4 +1,5 @@
 package chat.simplex.app
+
 import chat.simplex.common.ui.theme.MonetPalette
 import chat.simplex.common.ui.theme.getMonetPalette
 import androidx.compose.ui.graphics.Color
@@ -25,6 +26,7 @@ import chat.simplex.res.MR
 import java.lang.ref.WeakReference
 import chat.simplex.app.SingBoxService
 import chat.simplex.common.views.chatlist.ByeDpiBridge
+
 // Глобальный обработчик для открытия диалога из Compose UI
 var openByeDpiDialog: (() -> Unit)? = null
 
@@ -33,7 +35,7 @@ class MainActivity: FragmentActivity() {
     const val OLD_ANDROID_UI_FLAGS = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
   }
 
-override fun onCreate(savedInstanceState: Bundle?) {
+  override fun onCreate(savedInstanceState: Bundle?) {
     mainActivity = WeakReference(this)
     super.onCreate(savedInstanceState)
 
@@ -46,7 +48,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     }
 
     // 2. Динамические цвета Monet (Android 12+):
-   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       getMonetPalette = { isDark ->
         if (isDark) {
           MonetPalette(
@@ -153,9 +155,9 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
     SimplexApp.context.schedulePeriodicServiceRestartWorker()
     SimplexApp.context.schedulePeriodicWakeUp()
-  }// <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
+  } // <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
 
- // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
+  // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
   private fun createMD3DialogBackground(): android.graphics.drawable.Drawable {
     val density = resources.displayMetrics.density
     
@@ -284,132 +286,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
     dialog.show()
   }
-  // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
-  private fun showCustomVlessInputDialog() {
-    val currentKey = SingBoxService.getCustomKey(this)
-    val density = resources.displayMetrics.density
 
-    val container = android.widget.FrameLayout(this).apply {
-      setPadding((24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
-    }
-
-    val inputBgColor = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-      androidx.core.content.ContextCompat.getColor(this, android.R.color.system_neutral1_800)
-    } else {
-      android.graphics.Color.parseColor("#2C2C2C")
-    }
-
-    val input = android.widget.EditText(this).apply {
-      hint = "vless://... или https://..."
-      setText(currentKey)
-      setTextColor(android.graphics.Color.WHITE)
-      setHintTextColor(android.graphics.Color.GRAY)
-      textSize = 14f
-      setSingleLine(false)
-      maxLines = 5
-      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-      background = android.graphics.drawable.GradientDrawable().apply {
-        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        cornerRadius = 16f * density
-        setColor(inputBgColor)
-      }
-    }
-    container.addView(input)
-
-    val dialog = android.app.AlertDialog.Builder(this)
-      .setTitle("Свой VLESS или ссылка")
-      .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
-      .setView(container)
-      .setPositiveButton("Подключить") { _, _ ->
-        val key = input.text.toString().trim()
-        if (key.isNotEmpty()) {
-          SingBoxService.setCustomMode(this, true)
-          SingBoxService.setCustomKey(this, key)
-
-          if (SingBoxService.isRunning) {
-            SingBoxService.restart(this)
-          } else {
-            SingBoxService.start(this)
-          }
-        }
-      }
-      .setNegativeButton("Назад") { _, _ ->
-        showSingBoxDialog()
-      }
-      .create()
-
-    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
-    dialog.show()
-  }
-  // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
-  private fun showCustomVlessInputDialog() {
-    val currentKey = SingBoxService.getCustomKey(this)
-    val density = resources.displayMetrics.density
-
-    // Контейнер с отступами
-    val container = android.widget.FrameLayout(this).apply {
-      setPadding((24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
-    }
-
-    // Системные динамические цвета для поля ввода
-    val inputBgColor = com.google.android.material.color.MaterialColors.getColor(
-      this,
-      com.google.android.material.R.attr.colorSurfaceContainerHighest,
-      android.graphics.Color.DKGRAY
-    )
-    val textColor = com.google.android.material.color.MaterialColors.getColor(
-      this,
-      com.google.android.material.R.attr.colorOnSurface,
-      android.graphics.Color.WHITE
-    )
-    val hintColor = com.google.android.material.color.MaterialColors.getColor(
-      this,
-      com.google.android.material.R.attr.colorOnSurfaceVariant,
-      android.graphics.Color.GRAY
-    )
-
-    val input = android.widget.EditText(this).apply {
-      hint = "vless://... или https://..."
-      setText(currentKey)
-      setTextColor(textColor)
-      setHintTextColor(hintColor)
-      textSize = 14f
-      setSingleLine(false)
-      maxLines = 5
-      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-      background = android.graphics.drawable.GradientDrawable().apply {
-        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        cornerRadius = 16f * density
-        setColor(inputBgColor)
-      }
-    }
-    container.addView(input)
-
-    val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-      .setTitle("Свой VLESS или ссылка")
-      .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
-      .setView(container)
-      .setPositiveButton("Подключить") { _, _ ->
-        val key = input.text.toString().trim()
-        if (key.isNotEmpty()) {
-          SingBoxService.setCustomMode(this, true)
-          SingBoxService.setCustomKey(this, key)
-
-          if (SingBoxService.isRunning) {
-            SingBoxService.restart(this)
-          } else {
-            SingBoxService.start(this)
-          }
-        }
-      }
-      .setNegativeButton("Назад") { _, _ ->
-        showSingBoxDialog()
-      }
-      .create()
-
-    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
-    dialog.show()
-  }
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     processIntent(intent)
@@ -470,7 +347,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
       }
     }
   }
-}
+} // <--- Закрытие класса MainActivity
 
 fun processNotificationIntent(intent: Intent?) {
   val userId = getUserIdFromIntent(intent)
@@ -564,10 +441,3 @@ fun processExternalIntent(intent: Intent?) {
 
 fun isMediaIntent(intent: Intent): Boolean =
   intent.type?.startsWith("image/") == true || intent.type?.startsWith("video/") == true
-
-//fun testJson() {
-//  val str: String = """
-//  """.trimIndent()
-//
-//  println(json.decodeFromString<APIResult>(str))
-//}
