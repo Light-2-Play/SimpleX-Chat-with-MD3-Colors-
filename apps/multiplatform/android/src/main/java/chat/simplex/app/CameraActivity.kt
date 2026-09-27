@@ -711,13 +711,28 @@ fun bindCamera(previewView: PreviewView) {
 
                                         if (activeRecording != null || isRecordingVideo) {
                                             stopVideoRecording()
-                                        } else if (released) {
+                                       } else if (released) {
                                             currentImageCapture?.let { capture ->
-                                                takePhoto(capture, onImageCaptured, onError)
+                                                if (isNightSightActive) {
+                                                    isProcessingNightSight = true
+                                                }
+                                                takePhoto(
+                                                    imageCapture = capture,
+                                                    camera = currentCamera,
+                                                    isNightMode = isNightSightActive,
+                                                    scope = coroutineScope,
+                                                    onProgress = { frame -> nightSightProgress = frame },
+                                                    onSuccess = {
+                                                        isProcessingNightSight = false
+                                                        onImageCaptured()
+                                                    },
+                                                    onError = { exc ->
+                                                        isProcessingNightSight = false
+                                                        onError(exc)
+                                                    }
+                                                )
                                             }
                                         }
-                                    }
-                                )
                             }
                     ) // Закрывает Box затвора
 
@@ -766,9 +781,9 @@ fun bindCamera(previewView: PreviewView) {
             // КАСТОМНЫЙ НОЧНОЙ РЕЖИМ (15 кадров + склейка на GPU)
             scope.launch {
                 try {
-                    NightSightConfig.captureMultiFrameNightSight(
+                   NightSightConfig.captureMultiFrameNightSight(
                         context = this@CameraActivity,
-                        cameraControl = camera.cameraControl,
+                        camera = camera, // <--- ИСПРАВЛЕНО ЗДЕСЬ
                         imageCapture = imageCapture,
                         outputFile = photoFile,
                         onProgress = { progress -> runOnUiThread { onProgress(progress) } }
