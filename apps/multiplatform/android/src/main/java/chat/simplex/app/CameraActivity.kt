@@ -23,6 +23,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import android.hardware.camera2.CameraCharacteristics
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -254,19 +256,49 @@ fun bindCamera(previewView: PreviewView) {
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
 
-                val baseSelector = CameraSelector.Builder()
+               val baseSelector = CameraSelector.Builder()
                     .requireLensFacing(lensFacing)
                     .build()
+
+                // Получаем характеристики текущего сенсора
+                val cameraInfo = cameraProvider.getCameraInfo(baseSelector)
+                val camera2Info = Camera2CameraInfo.from(cameraInfo)
+                
+                val availableStabilizationModes = camera2Info.getCameraCharacteristic(
+                    CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+                ) ?: intArrayOf()
+
+                val availableOisModes = camera2Info.getCameraCharacteristic(
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
+                ) ?: intArrayOf()
 
                 // 1. Превью (видоискатель)
                 val previewBuilder = Preview.Builder()
                 val camera2Preview = Camera2Interop.Extender(previewBuilder)
 
-                // Оптическая стабилизация для основной камеры
-                if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                // Оптическая стабилизация (OIS) — включаем, если модуль есть физически
+                val supportsOis = availableOisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+                if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
                     camera2Preview.setCaptureRequestOption(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    )
+                }
+
+                // Электронная стабилизация (EIS) для превью и видео:
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION)
+                ) {
+                    // Android 13+: стабилизирует превью видоискателя и видеопоток синхронно
+                    camera2Preview.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
+                    )
+                } else if (availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+                    // Стандартный EIS для видеопотока
+                    camera2Preview.setCaptureRequestOption(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
                     )
                 }
 
@@ -281,7 +313,6 @@ fun bindCamera(previewView: PreviewView) {
                 val preview = previewBuilder.build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
-
                 // 2. Фотозахват (максимальное качество)
                 val captureBuilder = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
