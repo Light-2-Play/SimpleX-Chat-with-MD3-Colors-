@@ -9,9 +9,6 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.PointF
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.util.Log
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
@@ -26,19 +23,21 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sqrt
 
 object NightSightConfig {
 
     private const val TAG = "NightSightConfig"
     
-    // 1. 15 КАДРОВ И ПОДНЯТИЕ ЭКПОЗИЦИИ
-    // Начинаем с нейтральных/темных для деталей света, 
-    // затем делаем агрессивный упор в +1, +2, +3, +4 для вытягивания теней.
-    private val exposureBracket = listOf(
-        -2, -1, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4
-    )
-    val TOTAL_FRAMES = exposureBracket.size
+    // Снизили до 8 кадров (до 2-3 сек). Это золотой стандарт для съемки с рук.
+    // Больше = неизбежные вращения кисти, которые нельзя исправить простым X/Y сдвигом.
+    private val exposureBracket = listOf(-1, 0, 1, 2, 2, 3, 3, 4)
+    val MAX_FRAMES = exposureBracket.size
+    private const val MIN_FRAMES = 3
+
+    data class MotionResult(val dx: Float, val dy: Float, val error: Long)
 
     @SuppressLint("UnsafeOptInUsageError")
     suspend fun captureMultiFrameNightSight(
@@ -56,27 +55,30 @@ object NightSightConfig {
         var baseBitmap: Bitmap? = null
         var blendCanvas: Canvas? = null
 
-        // Настраиваем кисть на Осветление (SCREEN) - идеально для вытягивания света ночью
+        // Обычное наложение. Яркость будем доставать в конце.
         val blendPaint = Paint().apply {
             isAntiAlias = true
             isFilterBitmap = true
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
         }
 
-        try {
-            for (i in 0 until TOTAL_FRAMES) {
-                onProgress(i + 1)
+        var maxShiftLeft = 0f
+        var maxShiftRight = 0f
+        var maxShiftTop = 0f
+        var maxShiftBottom = 0f
+        
+        var framesProcessed = 0
 
-                // Устанавливаем целевую экспозицию в рамках возможностей сенсора смартфона
+        try {
+            for (i in 0 until MAX_FRAMES) {
+                onProgress(framesProcessed + 1) // Показываем реальный прогресс удачных кадров
+
                 val targetExposure = exposureBracket[i].coerceIn(range.lower, range.upper)
                 if (exposureState.isExposureCompensationSupported) {
                     cameraControl.setExposureCompensationIndex(targetExposure)
                 }
 
-                // Даем сенсору время применить экспозицию
-                delay(90)
+                delay(100)
 
-                // Делаем снимок
                 val imageProxy = takeSinglePhoto(context, imageCapture)
                 val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -90,7 +92,6 @@ object NightSightConfig {
                 }
                 val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 
-                // Поворачиваем кадр, если нужно
                 val currentFrame = if (rotationDegrees != 0 && rawBitmap != null) {
                     val rotMatrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
                     val rotated = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, rotMatrix, true)
@@ -103,39 +104,78 @@ object NightSightConfig {
                 if (currentFrame == null) continue
 
                 if (baseBitmap == null) {
-                    // Первый кадр становится базой
                     baseBitmap = currentFrame.copy(Bitmap.Config.ARGB_8888, true)
                     blendCanvas = Canvas(baseBitmap!!)
                     currentFrame.recycle()
+                    framesProcessed = 1
                 } else {
-                    // 2. КОМПЕНСАЦИЯ ДВИЖЕНИЯ (ANTI-SHAKE)
-                    // Находим сдвиг текущего кадра относительно базы
-                    val offset = calculateMotionOffset(baseBitmap!!, currentFrame)
-                    val alignMatrix = Matrix().apply {
-                        postTranslate(offset.x, offset.y)
+                    val motion = calculateMotionOffset(baseBitmap!!, currentFrame)
+                    val shiftDist = sqrt(motion.dx * motion.dx + motion.dy * motion.dy)
+                    
+                    // ЖЕСТКАЯ ОТБРАКОВКА (FRAME REJECTION)
+                    // Если кадр слишком сильно уехал или не совпадает по текстуре (сильный error)
+                    // значит рука дрогнула или повернулась. Мы просто выкидываем этот кадр!
+                    if (shiftDist > 65f || motion.error > 800_000L) {
+                        Log.w(TAG, "Кадр отбракован. Сдвиг: $shiftDist, Ошибка: ${motion.error}")
+                        currentFrame.recycle()
+                        
+                        // Если уже есть минимальное число хороших кадров — завершаем съемку досрочно
+                        if (framesProcessed >= MIN_FRAMES) break else continue
                     }
 
-                    // Чем светлее оригинальный кадр (к концу массива), тем больше его вес при осветлении
-                    val alphaWeight = if (i > 7) 0.6f else 0.4f
-                    blendPaint.alpha = (255f * alphaWeight).toInt()
+                    if (motion.dx > 0) maxShiftLeft = max(maxShiftLeft, motion.dx)
+                    else maxShiftRight = max(maxShiftRight, abs(motion.dx))
+                    
+                    if (motion.dy > 0) maxShiftTop = max(maxShiftTop, motion.dy)
+                    else maxShiftBottom = max(maxShiftBottom, abs(motion.dy))
 
-                    // Отрисовываем кадр со сдвигом, компенсируя дрожание рук
+                    val alignMatrix = Matrix().apply {
+                        postTranslate(motion.dx, motion.dy)
+                    }
+
+                    // МАТЕМАТИЧЕСКОЕ УСРЕДНЕНИЕ ШУМА
+                    // 2-й кадр: alpha = 127 (50%), 3-й: alpha = 85 (33%), 4-й: alpha = 63 (25%)
+                    // Это не делает яркие пиксели еще ярче, а именно сглаживает шум.
+                    blendPaint.alpha = (255f / (framesProcessed + 1)).toInt().coerceIn(10, 255)
+
                     blendCanvas?.drawBitmap(currentFrame, alignMatrix, blendPaint)
                     currentFrame.recycle()
+                    framesProcessed++
                 }
             }
 
-            // 3. ФИНАЛЬНЫЙ TONE MAPPING (Поднятие теней и контраста)
             baseBitmap?.let { bmp ->
-                applyHDRToneMapping(bmp, blendCanvas)
+                val cropX = maxShiftLeft.toInt()
+                val cropY = maxShiftTop.toInt()
+                val cropWidth = bmp.width - (maxShiftLeft + maxShiftRight).toInt()
+                val cropHeight = bmp.height - (maxShiftTop + maxShiftBottom).toInt()
+                
+                // Безопасный кроп черных краев
+                val croppedBmp = if (cropWidth > 0 && cropHeight > 0 && 
+                                    cropWidth <= bmp.width && cropHeight <= bmp.height &&
+                                    (cropWidth != bmp.width || cropHeight != bmp.height)) {
+                    try {
+                        Bitmap.createBitmap(bmp, cropX, cropY, cropWidth, cropHeight)
+                    } catch (e: Exception) {
+                        bmp
+                    }
+                } else {
+                    bmp
+                }
+                
+                // Агрессивный Tone Mapping для вытягивания общей яркости фото
+                applyHDRToneMapping(croppedBmp, Canvas(croppedBmp))
 
                 FileOutputStream(outputFile).use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    croppedBmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                }
+                
+                if (croppedBmp != bmp) {
+                    croppedBmp.recycle()
                 }
                 bmp.recycle()
             }
 
-            // Сбрасываем экспозицию в 0
             if (exposureState.isExposureCompensationSupported) {
                 cameraControl.setExposureCompensationIndex(0)
             }
@@ -151,19 +191,13 @@ object NightSightConfig {
         }
     }
 
-    /**
-     * Алгоритм быстрого поиска сдвига (Fast Block Matching).
-     * Сжимает изображения до 64x64 пикселей и ищет минимальную разницу, 
-     * чтобы вычислить дрожание рук (dx, dy).
-     */
-    private fun calculateMotionOffset(base: Bitmap, current: Bitmap): PointF {
-        val targetSize = 64f
+    private fun calculateMotionOffset(base: Bitmap, current: Bitmap): MotionResult {
+        val targetSize = 128f 
         val scale = targetSize / max(base.width, base.height).toFloat()
         
         val w = (base.width * scale).toInt()
         val h = (base.height * scale).toInt()
 
-        // Создаем миниатюры для сверхбыстрого анализа
         val baseThumb = Bitmap.createScaledBitmap(base, w, h, true)
         val currentThumb = Bitmap.createScaledBitmap(current, w, h, true)
 
@@ -172,27 +206,24 @@ object NightSightConfig {
         baseThumb.getPixels(basePixels, 0, w, 0, 0, w, h)
         currentThumb.getPixels(currentPixels, 0, w, 0, 0, w, h)
 
-        val searchRadius = 6 // Радиус поиска в миниатюре (эквивалентно большому сдвигу в оригинале)
+        val searchRadius = 7 
         var bestDx = 0
         var bestDy = 0
         var minError = Long.MAX_VALUE
 
-        // Проходим по возможным сдвигам
         for (dy in -searchRadius..searchRadius) {
             for (dx in -searchRadius..searchRadius) {
                 var error = 0L
-                // Сравниваем центральную область с шагом 2 (для максимальной скорости)
                 for (y in searchRadius until h - searchRadius step 2) {
                     for (x in searchRadius until w - searchRadius step 2) {
                         val basePixel = basePixels[y * w + x]
                         val curPixel = currentPixels[(y + dy) * w + (x + dx)]
 
-                        // Извлекаем яркость пикселей
                         val baseLum = ((basePixel shr 16 and 0xFF) + (basePixel shr 8 and 0xFF) + (basePixel and 0xFF))
                         val curLum = ((curPixel shr 16 and 0xFF) + (curPixel shr 8 and 0xFF) + (curPixel and 0xFF))
 
                         val diff = baseLum - curLum
-                        error += diff * diff // Сумма квадратов разностей
+                        error += diff * diff
                     }
                 }
                 if (error < minError) {
@@ -206,19 +237,16 @@ object NightSightConfig {
         baseThumb.recycle()
         currentThumb.recycle()
 
-        // Масштабируем найденный сдвиг обратно до размеров оригинального фото
         val fullDx = bestDx / scale
         val fullDy = bestDy / scale
 
-        return PointF(fullDx, fullDy)
+        return MotionResult(fullDx, fullDy, minError)
     }
 
-    /**
-     * Постобработка: поднятие микроконтраста и финальной яркости.
-     */
     private fun applyHDRToneMapping(bitmap: Bitmap, canvas: Canvas?) {
-        val contrast = 1.18f
-        val brightness = 25f // Существенное увеличение яркости
+        val contrast = 1.15f
+        // Радикально повышаем базовую яркость, чтобы скомпенсировать отказ от режима SCREEN
+        val brightness = 40f 
 
         val colorMatrix = ColorMatrix(floatArrayOf(
             contrast, 0f, 0f, 0f, brightness,
