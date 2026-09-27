@@ -155,42 +155,96 @@ override fun onCreate(savedInstanceState: Bundle?) {
     SimplexApp.context.schedulePeriodicWakeUp()
   }// <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
 
-  // Теперь объявляется функция диалога (ПОСЛЕ onCreate, но ВНУТРИ класса MainActivity):
- private fun showSingBoxDialog() {
+  // Диалог настроек SingBox
+  private fun showSingBoxDialog() {
     val options = arrayOf(
       "25 серверов (рекомендуется)",
       "50 серверов",
       "100 серверов",
-      "Все доступные"
+      "Все доступные (0)",
+      "✏️ Свой VLESS / ссылка на подписку"
     )
     val limits = intArrayOf(25, 50, 100, 0)
 
+    val isCustom = SingBoxService.isCustomMode(this)
     val currentLimit = SingBoxService.getServerLimit(this)
-    var selectedIndex = limits.indexOf(currentLimit).let { if (it == -1) 0 else it }
+    
+    // Если включен свой ключ — выбираем 4-й пункт, иначе ищем позицию в limits
+    var selectedIndex = if (isCustom) {
+      4
+    } else {
+      limits.indexOf(currentLimit).let { if (it == -1) 0 else it }
+    }
 
-    val statusText = if (SingBoxService.isRunning) "● VLESS активен (порт 20808)" else "○ VLESS выключен"
+    val modeLabel = if (isCustom) "Свой VLESS" else "Автоподбор"
+    val statusText = if (SingBoxService.isRunning) "● VLESS активен ($modeLabel, порт 20808)" else "○ VLESS выключен"
 
     android.app.AlertDialog.Builder(this)
-      // Переносим статус в заголовок, чтобы не блокировать список:
       .setTitle("Настройки VLESS Proxy\n$statusText")
-      // Убираем .setMessage(...) — теперь этот список гарантированно отобразится:
       .setSingleChoiceItems(options, selectedIndex) { _, which ->
         selectedIndex = which
       }
-      .setPositiveButton(if (SingBoxService.isRunning) "Перезапустить" else "Включить") { _, _ ->
-        val newLimit = limits[selectedIndex]
-        SingBoxService.setServerLimit(this, newLimit)
-
-        if (SingBoxService.isRunning) {
-          SingBoxService.restart(this)
+      .setPositiveButton(if (SingBoxService.isRunning) "Применить" else "Включить") { _, _ ->
+        if (selectedIndex == 4) {
+          // Открываем ввод своего ключа
+          showCustomVlessInputDialog()
         } else {
-          SingBoxService.start(this)
+          // Режим автоподбора: отключаем customMode и сохраняем лимит
+          SingBoxService.setCustomMode(this, false)
+          SingBoxService.setServerLimit(this, limits[selectedIndex])
+
+          if (SingBoxService.isRunning) {
+            SingBoxService.restart(this)
+          } else {
+            SingBoxService.start(this)
+          }
         }
       }
       .setNegativeButton("Отключить") { _, _ ->
         SingBoxService.stop()
       }
       .setNeutralButton("Отмена", null)
+      .show()
+  }
+
+  // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
+  private fun showCustomVlessInputDialog() {
+    val currentKey = SingBoxService.getCustomKey(this)
+
+    // Контейнер с отступами, чтобы поле ввода не прилипало к краям диалога
+    val paddingPx = (20 * resources.displayMetrics.density).toInt()
+    val container = android.widget.FrameLayout(this).apply {
+      setPadding(paddingPx, (8 * resources.displayMetrics.density).toInt(), paddingPx, 0)
+    }
+
+    val input = android.widget.EditText(this).apply {
+      hint = "vless://... или https://..."
+      setText(currentKey)
+      setSingleLine(false)
+      maxLines = 5
+    }
+    container.addView(input)
+
+    android.app.AlertDialog.Builder(this)
+      .setTitle("Свой VLESS или ссылка")
+      .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
+      .setView(container)
+      .setPositiveButton("Подключить") { _, _ ->
+        val key = input.text.toString().trim()
+        if (key.isNotEmpty()) {
+          SingBoxService.setCustomMode(this, true)
+          SingBoxService.setCustomKey(this, key)
+
+          if (SingBoxService.isRunning) {
+            SingBoxService.restart(this)
+          } else {
+            SingBoxService.start(this)
+          }
+        }
+      }
+      .setNegativeButton("Назад") { _, _ ->
+        showSingBoxDialog()
+      }
       .show()
   }
 
