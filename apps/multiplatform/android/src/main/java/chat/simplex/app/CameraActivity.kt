@@ -148,7 +148,7 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
     @Composable
     private fun CameraScreen(
         onImageCaptured: () -> Unit,
-        onError: (ImageCaptureException) -> Unit,
+        onError: (Exception) -> Unit, // <--- ИСПРАВЛЕННАЯ СТРОЧКА
         onClose: () -> Unit
     ) {
         var cachedPreviewView by remember { mutableStateOf<PreviewView?>(null) }
