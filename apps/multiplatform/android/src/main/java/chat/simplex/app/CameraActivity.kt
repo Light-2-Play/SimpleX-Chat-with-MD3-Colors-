@@ -169,6 +169,10 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
         var maxZoomRatio by remember { mutableStateOf(1.0f) }
         var currentZoomRatio by remember { mutableStateOf(1.0f) }
 
+        // ВОТ СЮДА ВСТАВЛЯЕМ ЭТИ ДВЕ СТРОЧКИ:
+        var nightSightProgress by remember { mutableStateOf(0) }
+        var isProcessingNightSight by remember { mutableStateOf(false) }
+
         // Токены темы Monet
         val monetAccent = remember(context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -748,20 +752,29 @@ fun bindCamera(previewView: PreviewView) {
 
     private fun takePhoto(
         imageCapture: ImageCapture,
+        camera: Camera?,
+        isNightMode: Boolean,
+        scope: kotlinx.coroutines.CoroutineScope,
+        onProgress: (Int) -> Unit,
         onSuccess: () -> Unit,
-        onError: (ImageCaptureException) -> Unit
+        onError: (Exception) -> Unit
     ) {
         val photoFile = File(cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-        imageCapture.takePicture(
-            outputOptions,
-            cameraExecutor,
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+        if (isNightMode && camera != null) {
+            // КАСТОМНЫЙ НОЧНОЙ РЕЖИМ (15 кадров + склейка на GPU)
+            scope.launch {
+                try {
+                    NightSightConfig.captureMultiFrameNightSight(
+                        context = this@CameraActivity,
+                        cameraControl = camera.cameraControl,
+                        imageCapture = imageCapture,
+                        outputFile = photoFile,
+                        onProgress = { progress -> runOnUiThread { onProgress(progress) } }
+                    )
+
                     val authority = "${packageName}.provider"
                     val resultUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
-
                     val resultIntent = Intent().apply {
                         data = resultUri
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -771,12 +784,36 @@ fun bindCamera(previewView: PreviewView) {
                         onSuccess()
                         finish()
                     }
-                }
-
-                override fun onError(exc: ImageCaptureException) {
-                    runOnUiThread { onError(exc) }
+                } catch (e: Exception) {
+                    runOnUiThread { onError(e) }
                 }
             }
-        )
+        } else {
+            // ОБЫЧНОЕ ФОТО
+            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+            imageCapture.takePicture(
+                outputOptions,
+                cameraExecutor,
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        val authority = "${packageName}.provider"
+                        val resultUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
+                        val resultIntent = Intent().apply {
+                            data = resultUri
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        setResult(Activity.RESULT_OK, resultIntent)
+                        runOnUiThread {
+                            onSuccess()
+                            finish()
+                        }
+                    }
+
+                    override fun onError(exc: ImageCaptureException) {
+                        runOnUiThread { onError(exc) }
+                    }
+                }
+            )
+        }
     }
-} // Самая последняя скобка класса CameraActivity
+} // <--- Самая последняя скобка файла (закрывает class CameraActivity)
