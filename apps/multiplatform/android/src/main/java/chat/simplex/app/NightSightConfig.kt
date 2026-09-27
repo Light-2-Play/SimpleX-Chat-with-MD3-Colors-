@@ -9,6 +9,9 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PointF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.util.Log
 import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
@@ -31,8 +34,7 @@ object NightSightConfig {
 
     private const val TAG = "NightSightConfig"
     
-    // Снизили до 8 кадров (до 2-3 сек). Это золотой стандарт для съемки с рук.
-    // Больше = неизбежные вращения кисти, которые нельзя исправить простым X/Y сдвигом.
+    // Оптимальный массив: начинаем с базы, затем агрессивно собираем свет
     private val exposureBracket = listOf(-1, 0, 1, 2, 2, 3, 3, 4)
     val MAX_FRAMES = exposureBracket.size
     private const val MIN_FRAMES = 3
@@ -55,10 +57,12 @@ object NightSightConfig {
         var baseBitmap: Bitmap? = null
         var blendCanvas: Canvas? = null
 
-        // Обычное наложение. Яркость будем доставать в конце.
+        // ВЕРНУЛИ НАКОПЛЕНИЕ СВЕТА (SCREEN)
+        // Теперь оно безопасно, так как работает строгий трекинг дрожания рук
         val blendPaint = Paint().apply {
             isAntiAlias = true
             isFilterBitmap = true
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
         }
 
         var maxShiftLeft = 0f
@@ -70,7 +74,7 @@ object NightSightConfig {
 
         try {
             for (i in 0 until MAX_FRAMES) {
-                onProgress(framesProcessed + 1) // Показываем реальный прогресс удачных кадров
+                onProgress(framesProcessed + 1)
 
                 val targetExposure = exposureBracket[i].coerceIn(range.lower, range.upper)
                 if (exposureState.isExposureCompensationSupported) {
@@ -112,14 +116,10 @@ object NightSightConfig {
                     val motion = calculateMotionOffset(baseBitmap!!, currentFrame)
                     val shiftDist = sqrt(motion.dx * motion.dx + motion.dy * motion.dy)
                     
-                    // ЖЕСТКАЯ ОТБРАКОВКА (FRAME REJECTION)
-                    // Если кадр слишком сильно уехал или не совпадает по текстуре (сильный error)
-                    // значит рука дрогнула или повернулась. Мы просто выкидываем этот кадр!
+                    // Строгая отбраковка сдвигов
                     if (shiftDist > 65f || motion.error > 800_000L) {
                         Log.w(TAG, "Кадр отбракован. Сдвиг: $shiftDist, Ошибка: ${motion.error}")
                         currentFrame.recycle()
-                        
-                        // Если уже есть минимальное число хороших кадров — завершаем съемку досрочно
                         if (framesProcessed >= MIN_FRAMES) break else continue
                     }
 
@@ -133,10 +133,9 @@ object NightSightConfig {
                         postTranslate(motion.dx, motion.dy)
                     }
 
-                    // МАТЕМАТИЧЕСКОЕ УСРЕДНЕНИЕ ШУМА
-                    // 2-й кадр: alpha = 127 (50%), 3-й: alpha = 85 (33%), 4-й: alpha = 63 (25%)
-                    // Это не делает яркие пиксели еще ярче, а именно сглаживает шум.
-                    blendPaint.alpha = (255f / (framesProcessed + 1)).toInt().coerceIn(10, 255)
+                    // Осторожно добавляем яркость от каждого успешного кадра (30-45%)
+                    val alphaWeight = if (i > 4) 0.45f else 0.3f
+                    blendPaint.alpha = (255f * alphaWeight).toInt()
 
                     blendCanvas?.drawBitmap(currentFrame, alignMatrix, blendPaint)
                     currentFrame.recycle()
@@ -150,7 +149,6 @@ object NightSightConfig {
                 val cropWidth = bmp.width - (maxShiftLeft + maxShiftRight).toInt()
                 val cropHeight = bmp.height - (maxShiftTop + maxShiftBottom).toInt()
                 
-                // Безопасный кроп черных краев
                 val croppedBmp = if (cropWidth > 0 && cropHeight > 0 && 
                                     cropWidth <= bmp.width && cropHeight <= bmp.height &&
                                     (cropWidth != bmp.width || cropHeight != bmp.height)) {
@@ -163,16 +161,15 @@ object NightSightConfig {
                     bmp
                 }
                 
-                // Агрессивный Tone Mapping для вытягивания общей яркости фото
-                applyHDRToneMapping(croppedBmp, Canvas(croppedBmp))
+                // ИСПРАВЛЕНИЕ: Выполняем Tone Mapping в новый Bitmap, чтобы избежать глитчей Canvas
+                val finalBmp = applyHDRToneMapping(croppedBmp)
 
                 FileOutputStream(outputFile).use { out ->
-                    croppedBmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 }
                 
-                if (croppedBmp != bmp) {
-                    croppedBmp.recycle()
-                }
+                if (croppedBmp != bmp) croppedBmp.recycle()
+                if (finalBmp != croppedBmp) finalBmp.recycle()
                 bmp.recycle()
             }
 
@@ -243,10 +240,14 @@ object NightSightConfig {
         return MotionResult(fullDx, fullDy, minError)
     }
 
-    private fun applyHDRToneMapping(bitmap: Bitmap, canvas: Canvas?) {
+    // ИСПРАВЛЕНИЕ: Возвращает НОВЫЙ Bitmap, а не рисует сам на себе
+    private fun applyHDRToneMapping(source: Bitmap): Bitmap {
+        val result = Bitmap.createBitmap(source.width, source.height, source.config)
+        val canvas = Canvas(result)
+
+        // Мягкий контраст и легкая подсветка (основной свет уже собран через SCREEN)
         val contrast = 1.15f
-        // Радикально повышаем базовую яркость, чтобы скомпенсировать отказ от режима SCREEN
-        val brightness = 40f 
+        val brightness = 15f 
 
         val colorMatrix = ColorMatrix(floatArrayOf(
             contrast, 0f, 0f, 0f, brightness,
@@ -259,7 +260,8 @@ object NightSightConfig {
             colorFilter = ColorMatrixColorFilter(colorMatrix)
         }
 
-        canvas?.drawBitmap(bitmap, 0f, 0f, paint)
+        canvas.drawBitmap(source, 0f, 0f, paint)
+        return result
     }
 
     private suspend fun takeSinglePhoto(context: Context, imageCapture: ImageCapture): ImageProxy {
