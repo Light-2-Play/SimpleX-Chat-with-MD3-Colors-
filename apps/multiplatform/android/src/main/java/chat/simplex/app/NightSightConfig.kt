@@ -242,10 +242,10 @@ object NightSightConfig {
 
     // ИСПРАВЛЕНИЕ: Возвращает НОВЫЙ Bitmap, а не рисует сам на себе
     private fun applyHDRToneMapping(source: Bitmap): Bitmap {
-        val result = Bitmap.createBitmap(source.width, source.height, source.config)
+        val config = source.config ?: Bitmap.Config.ARGB_8888
+        val result = Bitmap.createBitmap(source.width, source.height, config)
         val canvas = Canvas(result)
 
-        // Мягкий контраст и легкая подсветка (основной свет уже собран через SCREEN)
         val contrast = 1.15f
         val brightness = 15f 
 
