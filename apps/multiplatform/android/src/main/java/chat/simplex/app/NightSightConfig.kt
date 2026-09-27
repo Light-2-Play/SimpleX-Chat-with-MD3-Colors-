@@ -29,12 +29,10 @@ import kotlin.coroutines.resumeWithException
 object NightSightConfig {
 
     private const val TAG = "NightSightConfig"
-    private const val TOTAL_FRAMES = 15
-
-    // Экспозиционная вилка (от темных к светлым кадрам)
-    private val exposureBracket = listOf(
-        -4, -3, -2, -1, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4
-    )
+    
+    // 5 кадров — оптимальный баланс между качеством и скоростью (съемка занимает ~2.5 секунды)
+    private val exposureBracket = listOf(-2, -1, 0, 1, 2)
+    val TOTAL_FRAMES = exposureBracket.size
 
     @SuppressLint("UnsafeOptInUsageError")
     suspend fun captureMultiFrameNightSight(
@@ -64,29 +62,26 @@ object NightSightConfig {
             for (i in 0 until TOTAL_FRAMES) {
                 onProgress(i + 1)
 
-                // 1. Безопасно выставляем экспозицию в границах текущего сенсора
-                val requestedIndex = exposureBracket.getOrElse(i) { 0 }
-                val safeIndex = requestedIndex.coerceIn(range.lower, range.upper)
+                val targetExposure = exposureBracket[i].coerceIn(range.lower, range.upper)
                 if (exposureState.isExposureCompensationSupported) {
-                    cameraControl.setExposureCompensationIndex(safeIndex)
+                    cameraControl.setExposureCompensationIndex(targetExposure)
                 }
 
-                // Задержка на отработку AE сенсора
-                delay(90)
+                delay(80)
 
-                // 2. Получаем кадр
                 val imageProxy = takeSinglePhoto(context, imageCapture)
                 val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
-                // 3. Декодируем байты кадра
                 val buffer = imageProxy.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
                 imageProxy.close()
 
-                val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                
-                // Корректируем ориентацию кадра в соответствии с положением смартфона
+                val options = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+
                 val currentFrame = if (rotationDegrees != 0 && rawBitmap != null) {
                     val rotMatrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
                     val rotated = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, rotMatrix, true)
@@ -98,48 +93,44 @@ object NightSightConfig {
 
                 if (currentFrame == null) continue
 
-                // 4. Наложение кадров и усреднение шума
                 if (baseBitmap == null) {
                     baseBitmap = currentFrame.copy(Bitmap.Config.ARGB_8888, true)
                     blendCanvas = Canvas(baseBitmap)
                     currentFrame.recycle()
                 } else {
-                    // Уменьшаем вес каждого последующего кадра для алгоритмического подавления шумов
-                    blendPaint.alpha = (255f * (1f / (i + 1))).toInt().coerceIn(12, 255)
+                    blendPaint.alpha = (255f * (1f / (i + 1))).toInt().coerceIn(20, 255)
                     blendCanvas?.drawBitmap(currentFrame, 0f, 0f, blendPaint)
                     currentFrame.recycle()
                 }
             }
 
-            // 5. Tone mapping (выравнивание динамического диапазона)
             baseBitmap?.let { bmp ->
                 applyHDRToneMapping(bmp, blendCanvas)
 
                 FileOutputStream(outputFile).use { out ->
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
                 }
                 bmp.recycle()
             }
 
-            // Сбрасываем экспозицию обратно в нейтраль
             if (exposureState.isExposureCompensationSupported) {
                 cameraControl.setExposureCompensationIndex(0)
             }
 
             return@withContext outputFile
 
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка многокадровой ночной съёмки", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Ошибка многокадровой ночной съёмки", t)
             if (exposureState.isExposureCompensationSupported) {
                 cameraControl.setExposureCompensationIndex(0)
             }
-            throw e
+            throw Exception(t.message)
         }
     }
 
     private fun applyHDRToneMapping(bitmap: Bitmap, canvas: Canvas?) {
-        val contrast = 1.15f
-        val brightness = 14f
+        val contrast = 1.12f
+        val brightness = 12f
 
         val colorMatrix = ColorMatrix(floatArrayOf(
             contrast, 0f, 0f, 0f, brightness,
