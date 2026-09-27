@@ -34,10 +34,10 @@ object NightSightConfig {
 
     private const val TAG = "NightSightConfig"
     
-    // Оптимальный массив: начинаем с базы, затем агрессивно собираем свет
-    private val exposureBracket = listOf(-1, 0, 1, 2, 2, 3, 3, 4)
+    // Снизили до 4 кадров. Агрессивный шаг экспозиции, чтобы захватить максимум света
+    private val exposureBracket = listOf(0, 1, 2, 3)
     val MAX_FRAMES = exposureBracket.size
-    private const val MIN_FRAMES = 3
+    private const val MIN_FRAMES = 2
 
     data class MotionResult(val dx: Float, val dy: Float, val error: Long)
 
@@ -57,8 +57,9 @@ object NightSightConfig {
         var baseBitmap: Bitmap? = null
         var blendCanvas: Canvas? = null
 
-        // ВЕРНУЛИ НАКОПЛЕНИЕ СВЕТА (SCREEN)
-        // Теперь оно безопасно, так как работает строгий трекинг дрожания рук
+        // Режим SCREEN накапливает свет. 
+        // Временное шумоподавление (Temporal NR) происходит за счет того, 
+        // что мы берем только часть непрозрачности (alpha) от каждого кадра.
         val blendPaint = Paint().apply {
             isAntiAlias = true
             isFilterBitmap = true
@@ -81,7 +82,7 @@ object NightSightConfig {
                     cameraControl.setExposureCompensationIndex(targetExposure)
                 }
 
-                delay(100)
+                delay(120) // Чуть увеличили задержку, так как выдержка стала длиннее (EV +3)
 
                 val imageProxy = takeSinglePhoto(context, imageCapture)
                 val rotationDegrees = imageProxy.imageInfo.rotationDegrees
@@ -93,6 +94,8 @@ object NightSightConfig {
 
                 val options = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
+                    // Запрашиваем максимально сырой несжатый Bitmap (Dither)
+                    inDither = true 
                 }
                 val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 
@@ -116,9 +119,8 @@ object NightSightConfig {
                     val motion = calculateMotionOffset(baseBitmap!!, currentFrame)
                     val shiftDist = sqrt(motion.dx * motion.dx + motion.dy * motion.dy)
                     
-                    // Строгая отбраковка сдвигов
-                    if (shiftDist > 65f || motion.error > 800_000L) {
-                        Log.w(TAG, "Кадр отбракован. Сдвиг: $shiftDist, Ошибка: ${motion.error}")
+                    // Жесткий допуск, так как кадров всего 4. Ошибка выравнивания критична.
+                    if (shiftDist > 70f || motion.error > 850_000L) {
                         currentFrame.recycle()
                         if (framesProcessed >= MIN_FRAMES) break else continue
                     }
@@ -133,9 +135,8 @@ object NightSightConfig {
                         postTranslate(motion.dx, motion.dy)
                     }
 
-                    // Осторожно добавляем яркость от каждого успешного кадра (30-45%)
-                    val alphaWeight = if (i > 4) 0.45f else 0.3f
-                    blendPaint.alpha = (255f * alphaWeight).toInt()
+                    // Балансировка веса кадра для снижения теплового шума
+                    blendPaint.alpha = (255f * 0.40f).toInt() 
 
                     blendCanvas?.drawBitmap(currentFrame, alignMatrix, blendPaint)
                     currentFrame.recycle()
@@ -161,11 +162,11 @@ object NightSightConfig {
                     bmp
                 }
                 
-                // ИСПРАВЛЕНИЕ: Выполняем Tone Mapping в новый Bitmap, чтобы избежать глитчей Canvas
-                val finalBmp = applyHDRToneMapping(croppedBmp)
+                // Финальный проход: программный Denoise + Буст экспозиции
+                val finalBmp = applyDenoiseAndExposure(croppedBmp)
 
                 FileOutputStream(outputFile).use { out ->
-                    finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    finalBmp.compress(Bitmap.CompressFormat.JPEG, 97, out) // Качество 97 для сохранения деталей
                 }
                 
                 if (croppedBmp != bmp) croppedBmp.recycle()
@@ -240,19 +241,29 @@ object NightSightConfig {
         return MotionResult(fullDx, fullDy, minError)
     }
 
-    // ИСПРАВЛЕНИЕ: Возвращает НОВЫЙ Bitmap, а не рисует сам на себе
-    private fun applyHDRToneMapping(source: Bitmap): Bitmap {
+    // Программный фильтр постобработки (заменяет аппаратный ISP RAW Denoise)
+    private fun applyDenoiseAndExposure(source: Bitmap): Bitmap {
         val config = source.config ?: Bitmap.Config.ARGB_8888
         val result = Bitmap.createBitmap(source.width, source.height, config)
         val canvas = Canvas(result)
 
-        val contrast = 1.15f
-        val brightness = 15f 
+        // 1. Агрессивное поднятие экспозиции (базовая яркость и контраст)
+        val contrast = 1.18f
+        val brightness = 35f 
+
+        // 2. Chroma Denoise: слегка гасим насыщенность в темных участках, 
+        // чтобы скрыть цветовой шум (синие/красные пиксели), характерный для съемки в темноте
+        val saturation = 0.85f 
+        
+        val invSat = 1 - saturation
+        val rWeight = 0.213f * invSat
+        val gWeight = 0.715f * invSat
+        val bWeight = 0.072f * invSat
 
         val colorMatrix = ColorMatrix(floatArrayOf(
-            contrast, 0f, 0f, 0f, brightness,
-            0f, contrast, 0f, 0f, brightness,
-            0f, 0f, contrast, 0f, brightness,
+            (rWeight + saturation) * contrast, gWeight * contrast, bWeight * contrast, 0f, brightness,
+            rWeight * contrast, (gWeight + saturation) * contrast, bWeight * contrast, 0f, brightness,
+            rWeight * contrast, gWeight * contrast, (bWeight + saturation) * contrast, 0f, brightness,
             0f, 0f, 0f, 1f, 0f
         ))
 
