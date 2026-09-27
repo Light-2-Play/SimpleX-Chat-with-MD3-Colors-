@@ -107,6 +107,10 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Получаем целевой URI от SimpleX Chat
+        outputUri = intent.getParcelableExtra(MediaStore.EXTRA_OUTPUT)
+            ?: intent.data
+
         val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
@@ -126,11 +130,11 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
     cameraExecutor.shutdown()
 }
 
-    private fun startCameraUI() {
+   private fun startCameraUI() {
         setContent {
             CameraScreen(
                 onImageCaptured = {
-                    setResult(Activity.RESULT_OK)
+                    // Результат с файлом уже выставлен в takePhoto, просто закрываем экран
                     finish()
                 },
                 onError = {
@@ -517,6 +521,38 @@ fun bindCamera(previewView: PreviewView) {
                 )
             }
 
+            // Индикатор ночной съемки
+            if (isProcessingNightSight) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.75f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        BasicText(
+                            text = "🌙 Ночная съемка...",
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        BasicText(
+                            text = "Держите камеру неподвижно\nКадр $nightSightProgress из 5",
+                            style = TextStyle(
+                                color = monetAccentSoft,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        )
+                    }
+                }
+            }
+
             // 2. Верхняя панель (Кнопка закрытия)
             Box(
                 modifier = Modifier
@@ -778,8 +814,35 @@ fun bindCamera(previewView: PreviewView) {
     ) {
         val photoFile = File(cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
 
+        fun deliverSuccess() {
+            // Если SimpleX передал целевой URI, копируем байты туда
+            outputUri?.let { destUri ->
+                try {
+                    contentResolver.openOutputStream(destUri)?.use { out ->
+                        FileInputStream(photoFile).use { input -> input.copyTo(out) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("CameraActivity", "Failed to write to outputUri", e)
+                }
+            }
+
+            val authority = "${packageName}.provider"
+            val fileUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
+            val finalUri = outputUri ?: fileUri
+
+            val resultIntent = Intent().apply {
+                data = finalUri
+                putExtra(MediaStore.EXTRA_OUTPUT, finalUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            setResult(Activity.RESULT_OK, resultIntent)
+            runOnUiThread {
+                onSuccess()
+                finish()
+            }
+        }
+
         if (isNightMode && camera != null) {
-            // КАСТОМНЫЙ НОЧНОЙ РЕЖИМ (15 кадров + склейка на GPU)
             scope.launch {
                 try {
                     NightSightConfig.captureMultiFrameNightSight(
@@ -789,41 +852,19 @@ fun bindCamera(previewView: PreviewView) {
                         outputFile = photoFile,
                         onProgress = { progress -> runOnUiThread { onProgress(progress) } }
                     )
-
-                    val authority = "${packageName}.provider"
-                    val resultUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
-                    val resultIntent = Intent().apply {
-                        data = resultUri
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    setResult(Activity.RESULT_OK, resultIntent)
-                    runOnUiThread {
-                        onSuccess()
-                        finish()
-                    }
+                    deliverSuccess()
                 } catch (e: Exception) {
                     runOnUiThread { onError(e) }
                 }
             }
         } else {
-            // ОБЫЧНОЕ ФОТО
             val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
             imageCapture.takePicture(
                 outputOptions,
                 cameraExecutor,
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val authority = "${packageName}.provider"
-                        val resultUri = FileProvider.getUriForFile(this@CameraActivity, authority, photoFile)
-                        val resultIntent = Intent().apply {
-                            data = resultUri
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        setResult(Activity.RESULT_OK, resultIntent)
-                        runOnUiThread {
-                            onSuccess()
-                            finish()
-                        }
+                        deliverSuccess()
                     }
 
                     override fun onError(exc: ImageCaptureException) {
