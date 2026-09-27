@@ -147,11 +147,10 @@ object NightSightConfig {
     /**
      * Обертка CameraX takePicture в корутину
      */
-    private suspend fun takeSinglePhoto(imageCapture: ImageCapture): ImageProxy {
+    private suspend fun takeSinglePhoto(context: Context, imageCapture: ImageCapture): ImageProxy {
         return suspendCancellableCoroutine { continuation ->
             imageCapture.takePicture(
-                ContextCompat.getMainExecutor(ImageCapture.Builder().build().hashCode()), // dummy executor placeholder
-                kotlinx.coroutines.Runnable::run,
+                androidx.core.content.ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
                         continuation.resume(image)
@@ -164,4 +163,3 @@ object NightSightConfig {
             )
         }
     }
-}
