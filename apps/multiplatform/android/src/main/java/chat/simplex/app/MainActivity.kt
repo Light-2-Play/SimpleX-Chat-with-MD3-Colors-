@@ -155,22 +155,20 @@ override fun onCreate(savedInstanceState: Bundle?) {
     SimplexApp.context.schedulePeriodicWakeUp()
   }// <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
 
- // Вспомогательный метод: мягкие углы 28dp и динамический цвет подложки Material You
+ // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
   private fun createMD3DialogBackground(): android.graphics.drawable.Drawable {
     val density = resources.displayMetrics.density
-    val surfaceColor = com.google.android.material.color.MaterialColors.getColor(
-      this,
-      com.google.android.material.R.attr.colorSurfaceContainerHigh,
-      com.google.android.material.color.MaterialColors.getColor(
-        this,
-        com.google.android.material.R.attr.colorSurface,
-        android.graphics.Color.DKGRAY
-      )
-    )
+    
+    // Получаем цвет фона из системной палитры Monet без сторонних библиотек
+    val surfaceColor = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+      androidx.core.content.ContextCompat.getColor(this, android.R.color.system_neutral1_900)
+    } else {
+      android.graphics.Color.parseColor("#1E1E1E")
+    }
 
     val shape = android.graphics.drawable.GradientDrawable().apply {
       this.shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-      cornerRadius = 28f * density
+      cornerRadius = 28f * density // Мягкие углы 28dp
       setColor(surfaceColor)
     }
 
@@ -181,18 +179,17 @@ override fun onCreate(savedInstanceState: Bundle?) {
   // Диалог настроек SingBox
   private fun showSingBoxDialog() {
     val options = arrayOf(
-      "25 серверов (рекомендуется)",
-      "50 серверов",
-      "100 серверов",
-      "Все доступные",
-      "Свой VLESS / подписку"
+      "25 серверов (Lite)",
+      "50 серверов (Mid)",
+      "100 серверов (high)",
+      "Все доступные (Ultra)",
+      "Свой VLESS / подписка (Recommended)"
     )
     val limits = intArrayOf(25, 50, 100, 0)
 
     val isCustom = SingBoxService.isCustomMode(this)
     val currentLimit = SingBoxService.getServerLimit(this)
     
-    // Если включен свой ключ — выбираем 4-й пункт, иначе ищем позицию в limits
     var selectedIndex = if (isCustom) {
       4
     } else {
@@ -202,17 +199,15 @@ override fun onCreate(savedInstanceState: Bundle?) {
     val modeLabel = if (isCustom) "Свой VLESS" else "Автоподбор"
     val statusText = if (SingBoxService.isRunning) "● VLESS активен ($modeLabel, порт 20808)" else "○ VLESS выключен"
 
-    val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+    val dialog = android.app.AlertDialog.Builder(this)
       .setTitle("Настройки VLESS Proxy\n$statusText")
       .setSingleChoiceItems(options, selectedIndex) { _, which ->
         selectedIndex = which
       }
       .setPositiveButton(if (SingBoxService.isRunning) "Применить" else "Включить") { _, _ ->
         if (selectedIndex == 4) {
-          // Открываем ввод своего ключа
           showCustomVlessInputDialog()
         } else {
-          // Режим автоподбора: отключаем customMode и сохраняем лимит
           SingBoxService.setCustomMode(this, false)
           SingBoxService.setServerLimit(this, limits[selectedIndex])
 
@@ -233,6 +228,63 @@ override fun onCreate(savedInstanceState: Bundle?) {
     dialog.show()
   }
 
+  // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
+  private fun showCustomVlessInputDialog() {
+    val currentKey = SingBoxService.getCustomKey(this)
+    val density = resources.displayMetrics.density
+
+    val container = android.widget.FrameLayout(this).apply {
+      setPadding((24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
+    }
+
+    val inputBgColor = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+      androidx.core.content.ContextCompat.getColor(this, android.R.color.system_neutral1_800)
+    } else {
+      android.graphics.Color.parseColor("#2C2C2C")
+    }
+
+    val input = android.widget.EditText(this).apply {
+      hint = "vless://... или https://..."
+      setText(currentKey)
+      setTextColor(android.graphics.Color.WHITE)
+      setHintTextColor(android.graphics.Color.GRAY)
+      textSize = 14f
+      setSingleLine(false)
+      maxLines = 5
+      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+      background = android.graphics.drawable.GradientDrawable().apply {
+        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+        cornerRadius = 16f * density
+        setColor(inputBgColor)
+      }
+    }
+    container.addView(input)
+
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("Свой VLESS или ссылка")
+      .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
+      .setView(container)
+      .setPositiveButton("Подключить") { _, _ ->
+        val key = input.text.toString().trim()
+        if (key.isNotEmpty()) {
+          SingBoxService.setCustomMode(this, true)
+          SingBoxService.setCustomKey(this, key)
+
+          if (SingBoxService.isRunning) {
+            SingBoxService.restart(this)
+          } else {
+            SingBoxService.start(this)
+          }
+        }
+      }
+      .setNegativeButton("Назад") { _, _ ->
+        showSingBoxDialog()
+      }
+      .create()
+
+    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
+    dialog.show()
+  }
   // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
   private fun showCustomVlessInputDialog() {
     val currentKey = SingBoxService.getCustomKey(this)
