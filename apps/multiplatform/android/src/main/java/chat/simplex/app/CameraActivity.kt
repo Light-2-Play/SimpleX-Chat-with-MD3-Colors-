@@ -693,9 +693,10 @@ fun bindCamera(previewView: PreviewView) {
                                 if (isRecordingVideo) Color.Red else monetAccent,
                                 if (isRecordingVideo) RoundedCornerShape(8.dp) else CircleShape
                             )
-                            .pointerInput(currentImageCapture, currentVideoCapture) {
+                            .pointerInput(currentImageCapture, currentVideoCapture, currentCamera, isNightSightActive) {
                                 detectTapGestures(
                                     onPress = {
+                                        // Запускаем таймер долгого нажатия для видео
                                         val timerJob = coroutineScope.launch {
                                             delay(350)
                                             currentVideoCapture?.let { vc ->
@@ -704,7 +705,7 @@ fun bindCamera(previewView: PreviewView) {
                                                 }
                                             }
                                         }
-
+                                        
                                         val released = tryAwaitRelease()
                                         timerJob.cancel()
 
