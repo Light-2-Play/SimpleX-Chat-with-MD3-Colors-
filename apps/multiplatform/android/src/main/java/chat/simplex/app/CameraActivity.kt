@@ -622,243 +622,242 @@ fun bindCamera(previewView: PreviewView) {
                 }
             }
 
-           // 4. Нижняя панель управления
-Column(
-    modifier = Modifier
-        .fillMaxWidth()
-        .align(Alignment.BottomCenter)
-        .padding(bottom = 24.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.SpaceEvenly
-) {
-
-    // Ряд: [Колонка слева: 4:3 + Фонарик] — [Объективы по центру] — [Кнопка Луна справа]
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 28.dp, end = 28.dp, bottom = 16.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // СЛЕВА: Колонка с кнопкой 4:3 и кнопкой фонарика ПОД НЕЙ
+         // 4. Нижняя панель управления
         Column(
-            modifier = Modifier.align(Alignment.CenterStart),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Кнопка 4:3 / 1:1
+            // Ряд: [Колонка слева: 4:3 + Фонарик] — [Объективы по центру] — [Кнопка Луна справа]
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .background(monetButtonBg, CircleShape)
-                    .clickable {
-                        selectedAspectRatio = if (selectedAspectRatio == "4:3") "1:1" else "4:3"
-                    },
+                    .fillMaxWidth()
+                    .padding(start = 28.dp, end = 28.dp, bottom = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                BasicText(
-                    text = selectedAspectRatio,
-                    style = TextStyle(
-                        color = monetAccentSoft,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                )
-            }
-
-            // Кнопка фонарика строго под 4:3
-            if (hasFlashUnit) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            if (isTorchOn) monetAccent else monetButtonBg,
-                            CircleShape
-                        )
-                        .clickable { toggleTorch() },
-                    contentAlignment = Alignment.Center
+                // СЛЕВА: Колонка с кнопкой 4:3 и кнопкой фонарика ПОД НЕЙ
+                Column(
+                    modifier = Modifier.align(Alignment.CenterStart),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Canvas(modifier = Modifier.size(18.dp)) {
-                        // Отрисовка векторной молнии фонарика без внешних библиотек
-                        val path = Path().apply {
-                            moveTo(size.width * 0.58f, 0f)
-                            lineTo(size.width * 0.18f, size.height * 0.56f)
-                            lineTo(size.width * 0.48f, size.height * 0.56f)
-                            lineTo(size.width * 0.42f, size.height)
-                            lineTo(size.width * 0.82f, size.height * 0.44f)
-                            lineTo(size.width * 0.52f, size.height * 0.44f)
-                            close()
-                        }
-                        drawPath(
-                            path = path, 
-                            color = if (isTorchOn) Color.Black else monetAccentSoft
-                        )
-                    }
-                }
-            }
-
-        // Пресеты зума по центру
-        if (lensPresets.size > 1) {
-            Row(
-                modifier = Modifier
-                    .background(monetButtonBg, CircleShape)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                lensPresets.forEach { (ratio, label) ->
-                    val isSelected = kotlin.math.abs(currentZoomRatio - ratio) < 0.25f
-
+                    // Кнопка 4:3 / 1:1
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
-                            .background(
-                                if (isSelected) monetAccent else Color.Transparent,
-                                CircleShape
-                            )
-                            .clickable { onSelectLens(ratio) },
+                            .size(40.dp)
+                            .background(monetButtonBg, CircleShape)
+                            .clickable {
+                                selectedAspectRatio = if (selectedAspectRatio == "4:3") "1:1" else "4:3"
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         BasicText(
-                            text = label,
+                            text = selectedAspectRatio,
                             style = TextStyle(
-                                color = if (isSelected) Color.Black else monetAccentSoft,
+                                color = monetAccentSoft,
                                 fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center
                             )
                         )
                     }
-                }
-            }
-        }
 
-        // Кнопка ночного режима справа
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .size(40.dp)
-                .background(
-                    if (isNightSightActive) monetAccent else monetButtonBg,
-                    CircleShape
-                )
-                .clickable {
-                    isNightSightActive = !isNightSightActive
-                    cachedPreviewView?.let { bindCamera(it) }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.size(18.dp)) {
-                val path = Path().apply {
-                    moveTo(size.width * 0.75f, size.height * 0.15f)
-                    cubicTo(size.width * 0.35f, size.height * 0.15f, size.width * 0.15f, size.height * 0.45f, size.width * 0.25f, size.height * 0.85f)
-                    cubicTo(size.width * 0.55f, size.height * 1.05f, size.width * 0.95f, size.height * 0.85f, size.width * 0.95f, size.height * 0.65f)
-                    cubicTo(size.width * 0.65f, size.height * 0.70f, size.width * 0.55f, size.height * 0.35f, size.width * 0.75f, size.height * 0.15f)
-                    close()
-                }
-                drawPath(path = path, color = if (isNightSightActive) Color.Black else monetAccentSoft)
-            }
-        }
-    } // Закрывает Box ряда пресетов
-
-    // Нижний ряд: [Спейсер] — [Затвор] — [Переворот камеры]
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 28.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Spacer(modifier = Modifier.size(48.dp))
-
-        // Затвор (Тап = Фото, Удержание = Видео)
-        Box(
-            modifier = Modifier
-                .size(76.dp)
-                .border(4.dp, if (isRecordingVideo) Color.Red else monetAccent, CircleShape)
-                .padding(if (isRecordingVideo) 14.dp else 6.dp)
-                .background(
-                    if (isRecordingVideo) Color.Red else monetAccent,
-                    if (isRecordingVideo) RoundedCornerShape(8.dp) else CircleShape
-                )
-                .pointerInput(currentImageCapture, currentVideoCapture, currentCamera, isNightSightActive) {
-                    detectTapGestures(
-                        onPress = {
-                            val timerJob = coroutineScope.launch {
-                                delay(350)
-                                currentVideoCapture?.let { vc ->
-                                    if (activeRecording == null) {
-                                        startVideoRecording(vc)
-                                    }
+                    // Кнопка фонарика строго под 4:3
+                    if (hasFlashUnit) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    if (isTorchOn) monetAccent else monetButtonBg,
+                                    CircleShape
+                                )
+                                .clickable { toggleTorch() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.size(18.dp)) {
+                                val path = Path().apply {
+                                    moveTo(size.width * 0.58f, 0f)
+                                    lineTo(size.width * 0.18f, size.height * 0.56f)
+                                    lineTo(size.width * 0.48f, size.height * 0.56f)
+                                    lineTo(size.width * 0.42f, size.height)
+                                    lineTo(size.width * 0.82f, size.height * 0.44f)
+                                    lineTo(size.width * 0.52f, size.height * 0.44f)
+                                    close()
                                 }
-                            }
-
-                            val released = tryAwaitRelease()
-                            timerJob.cancel()
-
-                            if (activeRecording != null || isRecordingVideo) {
-                                stopVideoRecording()
-                            } else if (released) {
-                                currentImageCapture?.let { capture ->
-                                    if (isNightSightActive) {
-                                        isProcessingNightSight = true
-                                    }
-                                    takePhoto(
-                                        imageCapture = capture,
-                                        camera = currentCamera,
-                                        isNightMode = isNightSightActive,
-                                        scope = coroutineScope,
-                                        onProgress = { frame -> nightSightProgress = frame },
-                                        onSuccess = {
-                                            isProcessingNightSight = false
-                                            onImageCaptured()
-                                        },
-                                        onError = { exc ->
-                                            isProcessingNightSight = false
-                                            onError(exc)
-                                        }
-                                    )
-                                }
+                                drawPath(
+                                    path = path, 
+                                    color = if (isTorchOn) Color.Black else monetAccentSoft
+                                )
                             }
                         }
-                    )
+                    }
                 }
-        ) // Закрывает Box затвора
 
-        // Переворот камеры
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(monetButtonBg, CircleShape)
-                .clickable {
-                    if (isTorchOn) {
-                        currentCamera?.cameraControl?.enableTorch(false)
-                        isTorchOn = false
+                // Пресеты зума по центру
+                if (lensPresets.size > 1) {
+                    Row(
+                        modifier = Modifier
+                            .background(monetButtonBg, CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        lensPresets.forEach { (ratio, label) ->
+                            val isSelected = kotlin.math.abs(currentZoomRatio - ratio) < 0.25f
+
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(
+                                        if (isSelected) monetAccent else Color.Transparent,
+                                        CircleShape
+                                    )
+                                    .clickable { onSelectLens(ratio) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                BasicText(
+                                    text = label,
+                                    style = TextStyle(
+                                        color = if (isSelected) Color.Black else monetAccentSoft,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        textAlign = TextAlign.Center
+                                    )
+                                )
+                            }
+                        }
                     }
-                    lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                        CameraSelector.LENS_FACING_FRONT
-                    } else {
-                        CameraSelector.LENS_FACING_BACK
+                }
+
+                // Кнопка ночного режима справа
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(40.dp)
+                        .background(
+                            if (isNightSightActive) monetAccent else monetButtonBg,
+                            CircleShape
+                        )
+                        .clickable {
+                            isNightSightActive = !isNightSightActive
+                            cachedPreviewView?.let { bindCamera(it) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(18.dp)) {
+                        val path = Path().apply {
+                            moveTo(size.width * 0.75f, size.height * 0.15f)
+                            cubicTo(size.width * 0.35f, size.height * 0.15f, size.width * 0.15f, size.height * 0.45f, size.width * 0.25f, size.height * 0.85f)
+                            cubicTo(size.width * 0.55f, size.height * 1.05f, size.width * 0.95f, size.height * 0.85f, size.width * 0.95f, size.height * 0.65f)
+                            cubicTo(size.width * 0.65f, size.height * 0.70f, size.width * 0.55f, size.height * 0.35f, size.width * 0.75f, size.height * 0.15f)
+                            close()
+                        }
+                        drawPath(path = path, color = if (isNightSightActive) Color.Black else monetAccentSoft)
                     }
-                    cachedPreviewView?.let { bindCamera(it) }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.size(20.dp)) {
-                drawArc(
-                    color = monetAccentSoft,
-                    startAngle = 0f,
-                    sweepAngle = 280f,
-                    useCenter = false,
-                    style = Stroke(width = 2.5f.dp.toPx(), cap = StrokeCap.Round)
+                }
+            } // Закрывает Box верхнего ряда панели
+
+            // Нижний ряд: [Спейсер] — [Затвор] — [Переворот камеры]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 28.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Spacer(modifier = Modifier.size(48.dp))
+
+                // Затвор (Тап = Фото, Удержание = Видео)
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .border(4.dp, if (isRecordingVideo) Color.Red else monetAccent, CircleShape)
+                        .padding(if (isRecordingVideo) 14.dp else 6.dp)
+                        .background(
+                            if (isRecordingVideo) Color.Red else monetAccent,
+                            if (isRecordingVideo) RoundedCornerShape(8.dp) else CircleShape
+                        )
+                        .pointerInput(currentImageCapture, currentVideoCapture, currentCamera, isNightSightActive) {
+                            detectTapGestures(
+                                onPress = {
+                                    val timerJob = coroutineScope.launch {
+                                        delay(350)
+                                        currentVideoCapture?.let { vc ->
+                                            if (activeRecording == null) {
+                                                startVideoRecording(vc)
+                                            }
+                                        }
+                                    }
+
+                                    val released = tryAwaitRelease()
+                                    timerJob.cancel()
+
+                                    if (activeRecording != null || isRecordingVideo) {
+                                        stopVideoRecording()
+                                    } else if (released) {
+                                        currentImageCapture?.let { capture ->
+                                            if (isNightSightActive) {
+                                                isProcessingNightSight = true
+                                            }
+                                            takePhoto(
+                                                imageCapture = capture,
+                                                camera = currentCamera,
+                                                isNightMode = isNightSightActive,
+                                                scope = coroutineScope,
+                                                onProgress = { frame -> nightSightProgress = frame },
+                                                onSuccess = {
+                                                    isProcessingNightSight = false
+                                                    onImageCaptured()
+                                                },
+                                                onError = { exc ->
+                                                    isProcessingNightSight = false
+                                                    onError(exc)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
                 )
-            }
-        }
-    } // Закрывает Row нижнего ряда
-} // Закрывает Column нижней панелиней панели
-        } // 3. Закрывает корневой Box экрана
-    } // 4. Закрывает @Composable CameraScreen
 
+                // Переворот камеры
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(monetButtonBg, CircleShape)
+                        .clickable {
+                            if (isTorchOn) {
+                                currentCamera?.cameraControl?.enableTorch(false)
+                                isTorchOn = false
+                            }
+                            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                                CameraSelector.LENS_FACING_FRONT
+                            } else {
+                                CameraSelector.LENS_FACING_BACK
+                            }
+                            cachedPreviewView?.let { bindCamera(it) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(20.dp)) {
+                        drawArc(
+                            color = monetAccentSoft,
+                            startAngle = 0f,
+                            sweepAngle = 280f,
+                            useCenter = false,
+                            style = Stroke(width = 2.5f.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                }
+            } // Закрывает Row нижнего ряда
+        } // Закрывает Column нижней панели
+    } // Закрывает функцию CameraScreen
+
+    // Функция сохранения фото теперь снаружи (как положено)
     private fun takePhoto(
         imageCapture: ImageCapture,
         camera: Camera?,
@@ -871,7 +870,6 @@ Column(
         val photoFile = File(cacheDir, "IMG_${System.currentTimeMillis()}.jpg")
 
         fun deliverSuccess() {
-            // Если SimpleX передал целевой URI, копируем байты туда
             outputUri?.let { destUri ->
                 try {
                     contentResolver.openOutputStream(destUri)?.use { out ->
@@ -898,7 +896,6 @@ Column(
             }
         }
 
-        
         if (isNightMode && camera != null) {
             scope.launch {
                 try {
@@ -931,4 +928,4 @@ Column(
             )
         }
     }
-} // 5. Финальная скобка класса CameraActivity
+} // Финальная скобка закрывает класс CameraActivity
