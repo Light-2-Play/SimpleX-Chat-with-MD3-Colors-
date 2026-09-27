@@ -206,6 +206,22 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
       // Переменные для таймера записи
         var recordingTimeSeconds by remember { mutableStateOf(0) }
 
+// --- ВОТ СЮДА ВСТАВЛЯЕМ НАШ КОД (ШАГ 1 и ШАГ 2) ---
+        var isTorchOn by remember { mutableStateOf(false) }
+        val hasFlashUnit = remember(currentCamera) {
+            currentCamera?.cameraInfo?.hasFlashUnit() == true
+        }
+
+        val toggleTorch: () -> Unit = {
+            currentCamera?.let { cam ->
+                if (cam.cameraInfo.hasFlashUnit()) {
+                    val nextState = !isTorchOn
+                    cam.cameraControl.enableTorch(nextState)
+                    isTorchOn = nextState
+                }
+            }
+        }
+        
        // 1. Сначала объявляем остановку:
         fun stopVideoRecording() {
             activeRecording?.stop()
