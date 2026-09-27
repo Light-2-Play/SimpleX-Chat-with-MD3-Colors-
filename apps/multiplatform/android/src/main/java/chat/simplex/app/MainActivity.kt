@@ -155,14 +155,37 @@ override fun onCreate(savedInstanceState: Bundle?) {
     SimplexApp.context.schedulePeriodicWakeUp()
   }// <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
 
+ // Вспомогательный метод: мягкие углы 28dp и динамический цвет подложки Material You
+  private fun createMD3DialogBackground(): android.graphics.drawable.Drawable {
+    val density = resources.displayMetrics.density
+    val surfaceColor = com.google.android.material.color.MaterialColors.getColor(
+      this,
+      com.google.android.material.R.attr.colorSurfaceContainerHigh,
+      com.google.android.material.color.MaterialColors.getColor(
+        this,
+        com.google.android.material.R.attr.colorSurface,
+        android.graphics.Color.DKGRAY
+      )
+    )
+
+    val shape = android.graphics.drawable.GradientDrawable().apply {
+      this.shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+      cornerRadius = 28f * density
+      setColor(surfaceColor)
+    }
+
+    val margin = (16 * density).toInt()
+    return android.graphics.drawable.InsetDrawable(shape, margin, margin, margin, margin)
+  }
+
   // Диалог настроек SingBox
   private fun showSingBoxDialog() {
     val options = arrayOf(
       "25 серверов (рекомендуется)",
       "50 серверов",
       "100 серверов",
-      "Все доступные (0)",
-      "✏️ Свой VLESS / ссылка на подписку"
+      "Все доступные",
+      "Свой VLESS / подписку"
     )
     val limits = intArrayOf(25, 50, 100, 0)
 
@@ -179,7 +202,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     val modeLabel = if (isCustom) "Свой VLESS" else "Автоподбор"
     val statusText = if (SingBoxService.isRunning) "● VLESS активен ($modeLabel, порт 20808)" else "○ VLESS выключен"
 
-    android.app.AlertDialog.Builder(this)
+    val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
       .setTitle("Настройки VLESS Proxy\n$statusText")
       .setSingleChoiceItems(options, selectedIndex) { _, which ->
         selectedIndex = which
@@ -204,28 +227,57 @@ override fun onCreate(savedInstanceState: Bundle?) {
         SingBoxService.stop()
       }
       .setNeutralButton("Отмена", null)
-      .show()
+      .create()
+
+    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
+    dialog.show()
   }
 
   // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
   private fun showCustomVlessInputDialog() {
     val currentKey = SingBoxService.getCustomKey(this)
+    val density = resources.displayMetrics.density
 
-    // Контейнер с отступами, чтобы поле ввода не прилипало к краям диалога
-    val paddingPx = (20 * resources.displayMetrics.density).toInt()
+    // Контейнер с отступами
     val container = android.widget.FrameLayout(this).apply {
-      setPadding(paddingPx, (8 * resources.displayMetrics.density).toInt(), paddingPx, 0)
+      setPadding((24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
     }
+
+    // Системные динамические цвета для поля ввода
+    val inputBgColor = com.google.android.material.color.MaterialColors.getColor(
+      this,
+      com.google.android.material.R.attr.colorSurfaceContainerHighest,
+      android.graphics.Color.DKGRAY
+    )
+    val textColor = com.google.android.material.color.MaterialColors.getColor(
+      this,
+      com.google.android.material.R.attr.colorOnSurface,
+      android.graphics.Color.WHITE
+    )
+    val hintColor = com.google.android.material.color.MaterialColors.getColor(
+      this,
+      com.google.android.material.R.attr.colorOnSurfaceVariant,
+      android.graphics.Color.GRAY
+    )
 
     val input = android.widget.EditText(this).apply {
       hint = "vless://... или https://..."
       setText(currentKey)
+      setTextColor(textColor)
+      setHintTextColor(hintColor)
+      textSize = 14f
       setSingleLine(false)
       maxLines = 5
+      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+      background = android.graphics.drawable.GradientDrawable().apply {
+        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+        cornerRadius = 16f * density
+        setColor(inputBgColor)
+      }
     }
     container.addView(input)
 
-    android.app.AlertDialog.Builder(this)
+    val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
       .setTitle("Свой VLESS или ссылка")
       .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
       .setView(container)
@@ -245,9 +297,11 @@ override fun onCreate(savedInstanceState: Bundle?) {
       .setNegativeButton("Назад") { _, _ ->
         showSingBoxDialog()
       }
-      .show()
-  }
+      .create()
 
+    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
+    dialog.show()
+  }
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     processIntent(intent)
