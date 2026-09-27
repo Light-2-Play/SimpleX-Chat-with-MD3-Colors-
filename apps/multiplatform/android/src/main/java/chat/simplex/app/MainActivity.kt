@@ -157,7 +157,7 @@ class MainActivity: FragmentActivity() {
     SimplexApp.context.schedulePeriodicWakeUp()
   } // <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
 
-  // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
+ // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
   private fun createMD3DialogBackground(): android.graphics.drawable.Drawable {
     val density = resources.displayMetrics.density
     
@@ -175,6 +175,17 @@ class MainActivity: FragmentActivity() {
 
     val margin = (16 * density).toInt()
     return android.graphics.drawable.InsetDrawable(shape, margin, margin, margin, margin)
+  }
+
+  // Получение того же динамического акцентного цвета Monet, что и на главном экране
+  private fun getMonetAccentColor(): Int {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+      val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_NO
+      val resId = if (isDark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600
+      androidx.core.content.ContextCompat.getColor(this, resId)
+    } else {
+      android.graphics.Color.parseColor("#A8C7FA")
+    }
   }
 
   // Диалог настроек SingBox
@@ -200,8 +211,30 @@ class MainActivity: FragmentActivity() {
     val modeLabel = if (isCustom) "Свой VLESS" else "Автоподбор"
     val statusText = if (SingBoxService.isRunning) "● VLESS активен ($modeLabel, порт 20808)" else "○ VLESS выключен"
 
+    val accent = getMonetAccentColor()
+
+    // Стилизуем заголовок: делаем статус тоже под цвет темы (акцентный при включении)
+    val titleSpannable = android.text.SpannableStringBuilder().apply {
+      append("Настройки VLESS Proxy\n")
+      val start = length
+      append(statusText)
+      val statusColor = if (SingBoxService.isRunning) accent else android.graphics.Color.GRAY
+      setSpan(
+        android.text.style.ForegroundColorSpan(statusColor),
+        start,
+        length,
+        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+      )
+      setSpan(
+        android.text.style.RelativeSizeSpan(0.85f),
+        start,
+        length,
+        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+      )
+    }
+
     val dialog = android.app.AlertDialog.Builder(this)
-      .setTitle("Настройки VLESS Proxy\n$statusText")
+      .setTitle(titleSpannable)
       .setSingleChoiceItems(options, selectedIndex) { _, which ->
         selectedIndex = which
       }
@@ -227,6 +260,11 @@ class MainActivity: FragmentActivity() {
 
     dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
     dialog.show()
+
+    // Окрашиваем кнопки действий в цвет темы:
+    dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.setTextColor(accent)
+    dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setTextColor(accent)
+    dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL)?.setTextColor(accent)
   }
 
   // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
@@ -285,6 +323,11 @@ class MainActivity: FragmentActivity() {
 
     dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
     dialog.show()
+
+    // Окрашиваем кнопки «Подключить» и «Назад» в цвет темы:
+    val accent = getMonetAccentColor()
+    dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.setTextColor(accent)
+    dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setTextColor(accent)
   }
 
   override fun onNewIntent(intent: Intent) {
