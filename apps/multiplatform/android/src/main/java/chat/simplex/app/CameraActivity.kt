@@ -678,15 +678,24 @@ Column(
                         .clickable { toggleTorch() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                        contentDescription = "Фонарик",
-                        tint = if (isTorchOn) Color.Black else monetAccentSoft,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Canvas(modifier = Modifier.size(18.dp)) {
+                        // Отрисовка векторной молнии фонарика без внешних библиотек
+                        val path = Path().apply {
+                            moveTo(size.width * 0.58f, 0f)
+                            lineTo(size.width * 0.18f, size.height * 0.56f)
+                            lineTo(size.width * 0.48f, size.height * 0.56f)
+                            lineTo(size.width * 0.42f, size.height)
+                            lineTo(size.width * 0.82f, size.height * 0.44f)
+                            lineTo(size.width * 0.52f, size.height * 0.44f)
+                            close()
+                        }
+                        drawPath(
+                            path = path, 
+                            color = if (isTorchOn) Color.Black else monetAccentSoft
+                        )
+                    }
                 }
             }
-        }
 
         // Пресеты зума по центру
         if (lensPresets.size > 1) {
