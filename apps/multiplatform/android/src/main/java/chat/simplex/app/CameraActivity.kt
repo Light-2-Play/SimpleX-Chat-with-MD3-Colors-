@@ -542,7 +542,7 @@ fun bindCamera(previewView: PreviewView) {
                             )
                         )
                         BasicText(
-                            text = "Держите камеру неподвижно\nКадр $nightSightProgress из 5",
+                            text = "Держите камеру неподвижно\nКадр $nightSightProgress из auto",
                             style = TextStyle(
                                 color = monetAccentSoft,
                                 fontSize = 14.sp,
