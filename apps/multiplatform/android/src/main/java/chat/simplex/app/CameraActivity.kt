@@ -696,7 +696,6 @@ fun bindCamera(previewView: PreviewView) {
                             .pointerInput(currentImageCapture, currentVideoCapture, currentCamera, isNightSightActive) {
                                 detectTapGestures(
                                     onPress = {
-                                        // Запускаем таймер долгого нажатия для видео
                                         val timerJob = coroutineScope.launch {
                                             delay(350)
                                             currentVideoCapture?.let { vc ->
@@ -705,13 +704,13 @@ fun bindCamera(previewView: PreviewView) {
                                                 }
                                             }
                                         }
-                                        
+
                                         val released = tryAwaitRelease()
                                         timerJob.cancel()
 
                                         if (activeRecording != null || isRecordingVideo) {
                                             stopVideoRecording()
-                                       } else if (released) {
+                                        } else if (released) {
                                             currentImageCapture?.let { capture ->
                                                 if (isNightSightActive) {
                                                     isProcessingNightSight = true
@@ -733,6 +732,8 @@ fun bindCamera(previewView: PreviewView) {
                                                 )
                                             }
                                         }
+                                    }
+                                )
                             }
                     ) // Закрывает Box затвора
 
@@ -761,10 +762,10 @@ fun bindCamera(previewView: PreviewView) {
                             )
                         }
                     }
-                } // Закрывает Row нижнего ряда
-            } // Закрывает Column нижней панели
-        } // Закрывает корневой Box экрана
-    } // Закрывает @Composable CameraScreen
+                } // 1. Закрывает Row нижнего ряда
+            } // 2. Закрывает Column нижней панели
+        } // 3. Закрывает корневой Box экрана
+    } // 4. Закрывает @Composable CameraScreen
 
     private fun takePhoto(
         imageCapture: ImageCapture,
@@ -781,9 +782,9 @@ fun bindCamera(previewView: PreviewView) {
             // КАСТОМНЫЙ НОЧНОЙ РЕЖИМ (15 кадров + склейка на GPU)
             scope.launch {
                 try {
-                   NightSightConfig.captureMultiFrameNightSight(
+                    NightSightConfig.captureMultiFrameNightSight(
                         context = this@CameraActivity,
-                        camera = camera, // <--- ИСПРАВЛЕНО ЗДЕСЬ
+                        camera = camera,
                         imageCapture = imageCapture,
                         outputFile = photoFile,
                         onProgress = { progress -> runOnUiThread { onProgress(progress) } }
@@ -832,4 +833,4 @@ fun bindCamera(previewView: PreviewView) {
             )
         }
     }
-} // <--- Самая последняя скобка файла (закрывает class CameraActivity)
+} // 5. Финальная скобка класса CameraActivity
