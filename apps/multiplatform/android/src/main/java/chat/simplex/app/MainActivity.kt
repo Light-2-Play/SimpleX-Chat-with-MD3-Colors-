@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -201,14 +202,91 @@ class MainActivity: FragmentActivity() {
 }
 
 // =====================================================================
-// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (ДИНАМИЧЕСКИЙ MONET)
+// ПРЯМОЕ ИЗВЛЕЧЕНИЕ СИСТЕМНЫХ ЦВЕТОВ MONET ДЛЯ ДИАЛОГА (БЕЗ SIMPLEX BLUE)
+// =====================================================================
+data class DirectMonetColors(
+    val surface: Color,
+    val background: Color,
+    val onSurface: Color,
+    val onSurfaceVariant: Color,
+    val primary: Color,
+    val onPrimary: Color,
+    val primaryContainer: Color,
+    val onPrimaryContainer: Color,
+    val outline: Color
+)
+
+@Composable
+fun rememberDirectMonetColors(activity: MainActivity): DirectMonetColors {
+    // Определяем тему: ориентируемся на текущую тему мессенджера
+    val isLight = CurrentColors.value.colors.isLight
+    
+    return remember(isLight) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (isLight) {
+                DirectMonetColors(
+                    surface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_50)),
+                    background = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_100)),
+                    onSurface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_900)),
+                    onSurfaceVariant = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_700)),
+                    primary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_600)),
+                    onPrimary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_0)),
+                    primaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_100)),
+                    onPrimaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_900)),
+                    outline = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_500)).copy(alpha = 0.5f)
+                )
+            } else {
+                DirectMonetColors(
+                    surface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_800)),
+                    background = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_900)),
+                    onSurface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_100)),
+                    onSurfaceVariant = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_200)),
+                    primary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_200)),
+                    onPrimary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_900)),
+                    primaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_700)).copy(alpha = 0.45f),
+                    onPrimaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_100)),
+                    outline = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_400)).copy(alpha = 0.5f)
+                )
+            }
+        } else {
+            // Фолбек для старых устройств
+            if (isLight) {
+                DirectMonetColors(
+                    surface = Color.White,
+                    background = Color(0xFFF5F5F5),
+                    onSurface = Color.Black,
+                    onSurfaceVariant = Color.DarkGray,
+                    primary = Color(0xFF6750A4),
+                    onPrimary = Color.White,
+                    primaryContainer = Color(0xFFEADDFF),
+                    onPrimaryContainer = Color(0xFF21005D),
+                    outline = Color.Gray
+                )
+            } else {
+                DirectMonetColors(
+                    surface = Color(0xFF1E1E1E),
+                    background = Color(0xFF121212),
+                    onSurface = Color.White,
+                    onSurfaceVariant = Color.LightGray,
+                    primary = Color(0xFFA8C7FA),
+                    onPrimary = Color.Black,
+                    primaryContainer = Color(0xFF004A77),
+                    onPrimaryContainer = Color(0xFFC2E7FF),
+                    outline = Color.Gray
+                )
+            }
+        }
+    }
+}
+
+// =====================================================================
+// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (НАСТОЯЩИЙ MONET)
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
     if (!showSingBoxDialogState.value) return
 
-    // Берем те самые динамические цвета Monet, которые вы настроили в onCreate()
-    val colors = CurrentColors.value.colors
+    val monet = rememberDirectMonetColors(activity)
     var showCustomInputDialog by remember { mutableStateOf(false) }
 
     // Основной диалог выбора серверов
@@ -216,8 +294,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
         Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = colors.surface, // Динамический фон (system_neutral1_800/100)
-                modifier = Modifier.fillMaxWidth()
+                color = monet.surface, // Настоящий динамический фон
+                elevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
@@ -226,14 +307,14 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     Text(
                         text = "VLESS Proxy Settings",
-                        color = colors.onSurface,
+                        color = monet.onSurface,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = statusText,
-                        color = if (isRunning) colors.primary else colors.onSurface.copy(alpha = 0.6f),
+                        color = if (isRunning) monet.primary else monet.onSurfaceVariant,
                         fontSize = 14.sp
                     )
 
@@ -245,7 +326,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         "50 Servers (Mid)",
                         "100 Servers (High)",
                         "All available (Ultra)",
-                        "Custom VLESS / link"
+                        "Custom VLESS / Subscription"
                     )
 
                     var selectedIndex by remember {
@@ -264,37 +345,36 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
-                                    // Подсветка плашки динамическим акцентом (system_accent1_200/600)
-                                    if (isSelected) colors.primary.copy(alpha = 0.15f) else Color.Transparent
+                                    // Мягкая акцентная плашка выбранного элемента
+                                    if (isSelected) monet.primaryContainer else Color.Transparent
                                 )
                                 .clickable { selectedIndex = index }
                                 .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Динамическая радио-кнопка (круг)
+                            // Динамическая радио-кнопка в системных цветах
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .border(
                                         width = 2.dp,
-                                        color = if (isSelected) colors.primary else colors.onSurface.copy(alpha = 0.45f),
+                                        color = if (isSelected) monet.primary else monet.outline,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isSelected) {
-                                    // Динамическая радио-кнопка (внутренняя точка)
                                     Box(
                                         modifier = Modifier
                                             .size(10.dp)
-                                            .background(colors.primary, CircleShape)
+                                            .background(monet.primary, CircleShape)
                                     )
                                 }
                             }
                             Spacer(modifier = Modifier.width(14.dp))
                             Text(
                                 text = text,
-                                color = if (isSelected) colors.primary else colors.onSurface,
+                                color = if (isSelected) monet.onPrimaryContainer else monet.onSurface,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 fontSize = 15.sp
                             )
@@ -306,7 +386,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Овальные динамические кнопки действий
+                    // Овальные кнопки действий
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -315,7 +395,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         TextButton(
                             onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false },
                             shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
+                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
                         ) {
                             Text("Disable", fontWeight = FontWeight.SemiBold)
                         }
@@ -323,7 +403,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         TextButton(
                             onClick = { showSingBoxDialogState.value = false },
                             shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
+                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
                         ) {
                             Text("Cancel", fontWeight = FontWeight.SemiBold)
                         }
@@ -340,10 +420,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
-                            shape = CircleShape, // Овальная форма
+                            shape = CircleShape, // Овальная Pill-кнопка
                             colors = ButtonDefaults.buttonColors(
-                                backgroundColor = colors.primary, // Заливка акцентом
-                                contentColor = colors.onPrimary   // Текст внутри акцента (onPrimary)
+                                backgroundColor = monet.primary, // Динамический акцент Monet
+                                contentColor = monet.onPrimary
                             ),
                             elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
@@ -361,13 +441,16 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
         Dialog(onDismissRequest = { showCustomInputDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = colors.surface,
-                modifier = Modifier.fillMaxWidth()
+                color = monet.surface,
+                elevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text(
                         text = "Custom VLESS or link",
-                        color = colors.onSurface,
+                        color = monet.onSurface,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -378,19 +461,20 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... or https://...", color = colors.onSurface.copy(alpha = 0.45f)) },
+                        placeholder = { Text("vless://... or https://...", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
-                            textColor = colors.onSurface,
-                            placeholderColor = colors.onSurface.copy(alpha = 0.45f),
-                            backgroundColor = colors.background, // Чуть темнее (или светлее), чтобы выделялось
+                            textColor = monet.onSurface,
+                            placeholderColor = monet.onSurfaceVariant.copy(alpha = 0.6f),
+                            backgroundColor = monet.background,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
-                            cursorColor = colors.primary
+                            cursorColor = monet.primary
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(120.dp)
-                            .clip(RoundedCornerShape(16.dp)),
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(1.dp, monet.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
                         maxLines = 5
                     )
 
@@ -404,7 +488,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         TextButton(
                             onClick = { showCustomInputDialog = false },
                             shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
+                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
                         ) {
                             Text("Back", fontWeight = FontWeight.SemiBold)
                         }
@@ -423,8 +507,8 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
-                                backgroundColor = colors.primary,
-                                contentColor = colors.onPrimary
+                                backgroundColor = monet.primary,
+                                contentColor = monet.onPrimary
                             ),
                             elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
