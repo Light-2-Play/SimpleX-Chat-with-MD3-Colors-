@@ -192,7 +192,7 @@ dependencies {
     //androidTestImplementation("androidx.compose.ui:ui-test-junit4:$compose_version")
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.4")
 
-  val cameraxVersion = "1.6.2"
+  val cameraxVersion = "1.5.0"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
