@@ -11,6 +11,21 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.fragment.app.FragmentActivity
 import chat.simplex.app.model.NtfManager
 import chat.simplex.app.model.NtfManager.getUserIdFromIntent
@@ -27,7 +42,9 @@ import java.lang.ref.WeakReference
 import chat.simplex.app.SingBoxService
 import chat.simplex.common.views.chatlist.ByeDpiBridge
 
-// Глобальный обработчик для открытия диалога из Compose UI
+// Глобальное состояние для управления диалогом SingBox из Compose
+var showSingBoxDialogState = mutableStateOf(false)
+
 var openByeDpiDialog: (() -> Unit)? = null
 
 class MainActivity: FragmentActivity() {
@@ -39,78 +56,49 @@ class MainActivity: FragmentActivity() {
     mainActivity = WeakReference(this)
     super.onCreate(savedInstanceState)
 
-    // 1. Привязываем открытие диалога серверов к кнопкам тулбара:
     openByeDpiDialog = {
-      showSingBoxDialog()
+      showSingBoxDialogState.value = true
     }
     ByeDpiBridge.showDialog = {
-      showSingBoxDialog()
+      showSingBoxDialogState.value = true
     }
 
-    // 2. Динамические цвета Monet (Android 12+):
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       getMonetPalette = { isDark ->
         if (isDark) {
           MonetPalette(
-            // Основной акцент (как раз кнопка справа):
             primary = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_200)),
-            
-            // Второстепенный акцент (вкладки Contacts/Groups и поиск — делаем чуть мягче основного, но СВЕТЛЫМ):
             primaryVariant = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_300)),
-            
-            // Фоны (остаются тёмными):
             background = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_900)),
             surface = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_800)),
-            
-            // Иконка внутри акцентной кнопки (темная на светлой кнопке):
             onPrimary = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_900)),
-            
-            // Основной текст (белый/светло-серый):
             onBackground = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_100)),
             onSurface = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_100)),
-            
-            // Сообщения и плашки (меняем 700/800 на мягкие 200/300):
             sentMessage = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent2_800)),
             sentQuote = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent2_700)),
             receivedMessage = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral2_800)),
             receivedQuote = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral2_700)),
-            
-            // Дополнительный акцент (самый светлый тон для мелких индикаторов вроде 83%):
             primaryVariant2 = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_200))
           )
         } else {
-          // ветка для светлой темы остается без изменений
           MonetPalette(
-            // Primary (M3 Tone 40) — насыщенный фирменный акцент в светлой теме
             primary = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_600)),
-            // PrimaryVariant (M3 Primary Container Tone 90)
             primaryVariant = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_100)),
-
-            // Background / Surface (M3 Tone 98 / Tone 95)
             background = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_50)),
             surface = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_100)),
-
-            // OnPrimary (Tone 100) — белый текст на насыщенном акценте
             onPrimary = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_0)),
-
-            // OnSurface / OnBackground (Tone 10)
             onBackground = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_900)),
             onSurface = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral1_900)),
-
-            // Пузырьки чата в светлой теме
             sentMessage = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_100)),
             sentQuote = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_200)),
             receivedMessage = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral2_100)),
             receivedQuote = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_neutral2_200)),
-
-            // PrimaryVariant2 (Tone 10)
             primaryVariant2 = androidx.compose.ui.graphics.Color(getColor(android.R.color.system_accent1_900))
           )
         }
       }
     }
    
-    // 3. Родная инициализация темы и окружения SimpleX:
     platform.androidSetNightModeIfSupported()
     val c = CurrentColors.value.colors
     platform.androidSetStatusAndNavigationBarAppearance(c.isLight, c.isLight)
@@ -134,11 +122,10 @@ class MainActivity: FragmentActivity() {
       )
     }
 
-    // 4. Безопасный единственный запуск SingBox с задержкой (не блокирует сплеш-скрин):
     try {
       android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
         try {
-          SingBoxService.start(this)
+          SingBoxService.start(this@MainActivity)
         } catch (e: Throwable) {
           android.util.Log.e("SimpleXMod", "Ошибка запуска SingBox", e)
         }
@@ -150,185 +137,15 @@ class MainActivity: FragmentActivity() {
     enableEdgeToEdge()
 
     setContent {
+      // Подключаем наш диалог поверх всего приложения
+      SingBoxComposeDialogs(this@MainActivity)
+      
       AppScreen()
     }
 
     SimplexApp.context.schedulePeriodicServiceRestartWorker()
     SimplexApp.context.schedulePeriodicWakeUp()
-  } // <--- ВОТ ЗДЕСЬ законно закрывается метод onCreate
-
- // Вспомогательный метод: мягкие углы 28dp и системные цвета Monet (Android 12+)
-  private fun createMD3DialogBackground(): android.graphics.drawable.Drawable {
-    val density = resources.displayMetrics.density
-    
-    val surfaceColor = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-      androidx.core.content.ContextCompat.getColor(this, android.R.color.system_neutral1_900)
-    } else {
-      android.graphics.Color.parseColor("#1E1E1E")
-    }
-
-    val shape = android.graphics.drawable.GradientDrawable().apply {
-      this.shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-      cornerRadius = 28f * density
-      setColor(surfaceColor)
-    }
-
-    val margin = (16 * density).toInt()
-    return android.graphics.drawable.InsetDrawable(shape, margin, margin, margin, margin)
-  }
-
-  // Получение того же динамического акцентного цвета Monet, что и на главном экране
-  private fun getMonetAccentColor(): Int {
-    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-      val isDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) != android.content.res.Configuration.UI_MODE_NIGHT_NO
-      val resId = if (isDark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600
-      androidx.core.content.ContextCompat.getColor(this, resId)
-    } else {
-      android.graphics.Color.parseColor("#A8C7FA")
-    }
-  }
-
-  // Диалог настроек SingBox
-  private fun showSingBoxDialog() {
-    val options = arrayOf(
-      "25 серверов (Lite)",
-      "50 серверов (Mid)",
-      "100 серверов (High)",
-      "Все доступные (Ultra)",
-      "Свой VLESS / подписка (Recommended)"
-    )
-    val limits = intArrayOf(25, 50, 100, 0)
-
-    val isCustom = SingBoxService.isCustomMode(this)
-    val currentLimit = SingBoxService.getServerLimit(this)
-    
-    var selectedIndex = if (isCustom) {
-      4
-    } else {
-      limits.indexOf(currentLimit).let { if (it == -1) 0 else it }
-    }
-
-    val modeLabel = if (isCustom) "Свой VLESS" else "Автоподбор"
-    val statusText = if (SingBoxService.isRunning) "● VLESS активен ($modeLabel, порт 20808)" else "○ VLESS выключен"
-
-    val accent = getMonetAccentColor()
-
-    // Стилизуем заголовок: делаем статус тоже под цвет темы (акцентный при включении)
-    val titleSpannable = android.text.SpannableStringBuilder().apply {
-      append("Настройки VLESS Proxy\n")
-      val start = length
-      append(statusText)
-      val statusColor = if (SingBoxService.isRunning) accent else android.graphics.Color.GRAY
-      setSpan(
-        android.text.style.ForegroundColorSpan(statusColor),
-        start,
-        length,
-        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-      )
-      setSpan(
-        android.text.style.RelativeSizeSpan(0.85f),
-        start,
-        length,
-        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-      )
-    }
-
-    val dialog = android.app.AlertDialog.Builder(this)
-      .setTitle(titleSpannable)
-      .setSingleChoiceItems(options, selectedIndex) { _, which ->
-        selectedIndex = which
-      }
-      .setPositiveButton(if (SingBoxService.isRunning) "Применить" else "Включить") { _, _ ->
-        if (selectedIndex == 4) {
-          showCustomVlessInputDialog()
-        } else {
-          SingBoxService.setCustomMode(this, false)
-          SingBoxService.setServerLimit(this, limits[selectedIndex])
-
-          if (SingBoxService.isRunning) {
-            SingBoxService.restart(this)
-          } else {
-            SingBoxService.start(this)
-          }
-        }
-      }
-      .setNegativeButton("Отключить") { _, _ ->
-        SingBoxService.stop()
-      }
-      .setNeutralButton("Отмена", null)
-      .create()
-
-    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
-    dialog.show()
-
-    // Окрашиваем кнопки действий в цвет темы:
-    dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.setTextColor(accent)
-    dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setTextColor(accent)
-    dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL)?.setTextColor(accent)
-  }
-
-  // Окно для ввода VLESS ключа или HTTP/HTTPS ссылки
-  private fun showCustomVlessInputDialog() {
-    val currentKey = SingBoxService.getCustomKey(this)
-    val density = resources.displayMetrics.density
-
-    val container = android.widget.FrameLayout(this).apply {
-      setPadding((24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
-    }
-
-    val inputBgColor = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-      androidx.core.content.ContextCompat.getColor(this, android.R.color.system_neutral1_800)
-    } else {
-      android.graphics.Color.parseColor("#2C2C2C")
-    }
-
-    val input = android.widget.EditText(this).apply {
-      hint = "vless://... или https://..."
-      setText(currentKey)
-      setTextColor(android.graphics.Color.WHITE)
-      setHintTextColor(android.graphics.Color.GRAY)
-      textSize = 14f
-      setSingleLine(false)
-      maxLines = 5
-      setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-      background = android.graphics.drawable.GradientDrawable().apply {
-        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-        cornerRadius = 16f * density
-        setColor(inputBgColor)
-      }
-    }
-    container.addView(input)
-
-    val dialog = android.app.AlertDialog.Builder(this)
-      .setTitle("Свой VLESS или ссылка")
-      .setMessage("Вставьте прямую ссылку vless:// или URL-ссылку на подписку:")
-      .setView(container)
-      .setPositiveButton("Подключить") { _, _ ->
-        val key = input.text.toString().trim()
-        if (key.isNotEmpty()) {
-          SingBoxService.setCustomMode(this, true)
-          SingBoxService.setCustomKey(this, key)
-
-          if (SingBoxService.isRunning) {
-            SingBoxService.restart(this)
-          } else {
-            SingBoxService.start(this)
-          }
-        }
-      }
-      .setNegativeButton("Назад") { _, _ ->
-        showSingBoxDialog()
-      }
-      .create()
-
-    dialog.window?.setBackgroundDrawable(createMD3DialogBackground())
-    dialog.show()
-
-    // Окрашиваем кнопки «Подключить» и «Назад» в цвет темы:
-    val accent = getMonetAccentColor()
-    dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.setTextColor(accent)
-    dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setTextColor(accent)
-  }
+  } 
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
@@ -343,11 +160,6 @@ class MainActivity: FragmentActivity() {
 
   override fun onPause() {
     super.onPause()
-    /**
-     * When new activity is created after a click on notification, the old one receives onPause before
-     * recreation but receives onStop after recreation. So using both (onPause and onStop) to prevent
-     * unwanted multiple auth dialogs from [runAuthenticate]
-     * */
     AppLock.appWasHidden()
   }
 
@@ -364,23 +176,20 @@ class MainActivity: FragmentActivity() {
 
   override fun onBackPressed() {
     val canFinishActivity = (
-        onBackPressedDispatcher.hasEnabledCallbacks() // Has something to do in a backstack
-            || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R // Android 11 or above
-            || isTaskRoot // there are still other tasks after we reach the main (home) activity
+        onBackPressedDispatcher.hasEnabledCallbacks()
+            || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            || isTaskRoot 
         ) && SimplexApp.context.chatModel.sharedContent.value !is SharedContent.Forward
     if (canFinishActivity) {
-      // https://medium.com/mobile-app-development-publication/the-risk-of-android-strandhogg-security-issue-and-how-it-can-be-mitigated-80d2ddb4af06
       super.onBackPressed()
     }
 
     if (!onBackPressedDispatcher.hasEnabledCallbacks() && ChatController.appPrefs.performLA.get()) {
-      // When pressed Back and there is no one wants to process the back event, clear auth state to force re-auth on launch
       AppLock.clearAuthState()
       AppLock.laFailed.value = true
     }
     if (!onBackPressedDispatcher.hasEnabledCallbacks()) {
       val sharedContent = chatModel.sharedContent.value
-      // Drop shared content
       chatModel.sharedContent.value = null
       if (sharedContent is SharedContent.Forward) {
         chatModel.chatId.value = sharedContent.fromChatInfo.id
@@ -390,8 +199,213 @@ class MainActivity: FragmentActivity() {
       }
     }
   }
-} // <--- Закрытие класса MainActivity
+}
 
+// =====================================================================
+// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (ИДЕАЛЬНАЯ ТЕМА MD3)
+// =====================================================================
+@Composable
+fun SingBoxComposeDialogs(activity: MainActivity) {
+    if (!showSingBoxDialogState.value) return
+
+    val colors = CurrentColors.value.colors
+    var showCustomInputDialog by remember { mutableStateOf(false) }
+
+    // Основной диалог
+    if (!showCustomInputDialog) {
+        Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = colors.surface,
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
+                    val isRunning = SingBoxService.isRunning
+                    val statusText = if (isRunning) "● VLESS is active ($modeLabel)" else "○ VLESS Disable"
+
+                    Text(
+                        text = "VLESS Proxy Settings",
+                        color = colors.onSurface,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = statusText,
+                        color = if (isRunning) colors.primary else colors.onSurface.copy(alpha = 0.6f),
+                        fontSize = 14.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val limits = listOf(25, 50, 100, 0, -1) // -1 это Custom
+                    val options = listOf(
+                        "25 Servers (Lite)",
+                        "50 Servers (Mid)",
+                        "100 Servers (High)",
+                        "All Available (Ultra)",
+                        "VLESS Key / Subscription"
+                    )
+
+                    var selectedIndex by remember {
+                        val isCustom = SingBoxService.isCustomMode(activity)
+                        val curLim = SingBoxService.getServerLimit(activity)
+                        mutableStateOf(if (isCustom) 4 else {
+                            val idx = limits.indexOf(curLim)
+                            if (idx == -1) 0 else idx
+                        })
+                    }
+
+                    options.forEachIndexed { index, text ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { selectedIndex = index }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Кастомная радио-кнопка в цветах Monet
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .background(
+                                        color = if (selectedIndex == index) colors.primary else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .androidx.compose.foundation.border(
+                                        width = 2.dp,
+                                        color = if (selectedIndex == index) colors.primary else colors.onSurface.copy(alpha = 0.5f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selectedIndex == index) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(colors.onPrimary, CircleShape)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = text,
+                                color = colors.onSurface,
+                                fontSize = 16.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false }) {
+                            Text("Отключить", color = colors.primary)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { showSingBoxDialogState.value = false }) {
+                            Text("Отмена", color = colors.primary)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (selectedIndex == 4) {
+                                    showCustomInputDialog = true
+                                } else {
+                                    SingBoxService.setCustomMode(activity, false)
+                                    SingBoxService.setServerLimit(activity, limits[selectedIndex])
+                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                                    else SingBoxService.start(activity)
+                                    showSingBoxDialogState.value = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
+                        ) {
+                            Text(if (isRunning) "Применить" else "Включить")
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Диалог ввода кастомного ключа
+        Dialog(onDismissRequest = { showCustomInputDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = colors.surface,
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    Text(
+                        text = "Свой VLESS или ссылка",
+                        color = colors.onSurface,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    var customKey by remember { mutableStateOf(SingBoxService.getCustomKey(activity)) }
+
+                    TextField(
+                        value = customKey,
+                        onValueChange = { customKey = it },
+                        placeholder = { Text("vless://... или https://...", color = colors.onSurface.copy(alpha = 0.5f)) },
+                        colors = TextFieldDefaults.colors(
+                            focusedTextColor = colors.onSurface,
+                            unfocusedTextColor = colors.onSurface,
+                            focusedContainerColor = colors.background,
+                            unfocusedContainerColor = colors.background,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp)
+                            .clip(RoundedCornerShape(16.dp)),
+                        maxLines = 5
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showCustomInputDialog = false }) {
+                            Text("Назад", color = colors.primary)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val key = customKey.trim()
+                                if (key.isNotEmpty()) {
+                                    SingBoxService.setCustomMode(activity, true)
+                                    SingBoxService.setCustomKey(activity, key)
+                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                                    else SingBoxService.start(activity)
+                                    showCustomInputDialog = false
+                                    showSingBoxDialogState.value = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
+                        ) {
+                            Text("Подключить")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =====================================================================
+// ИНТЕНТЫ СТАНДАРТНОГО APP
+// =====================================================================
 fun processNotificationIntent(intent: Intent?) {
   val userId = getUserIdFromIntent(intent)
   when (intent?.action) {
@@ -431,7 +445,6 @@ fun processIntent(intent: Intent?) {
 fun processExternalIntent(intent: Intent?) {
   when (intent?.action) {
     Intent.ACTION_SEND -> {
-      // Close active chat and show a list of chats
       chatModel.chatId.value = null
       chatModel.clearOverlays.value = true
       when {
@@ -440,10 +453,8 @@ fun processExternalIntent(intent: Intent?) {
           val uri = intent.getParcelableExtra<Parcelable>(Intent.EXTRA_STREAM) as? Uri
           if (uri != null) {
             if (uri.scheme != "content") return showWrongUriAlert()
-            // Shared file that contains plain text, like `*.log` file
             chatModel.sharedContent.value = SharedContent.File(text ?: "", uri.toURI())
           } else if (text != null) {
-            // Shared just a text
             chatModel.sharedContent.value = SharedContent.Text(text)
           }
         }
@@ -452,7 +463,7 @@ fun processExternalIntent(intent: Intent?) {
           if (uri != null) {
             if (uri.scheme != "content") return showWrongUriAlert()
             chatModel.sharedContent.value = SharedContent.Media(intent.getStringExtra(Intent.EXTRA_TEXT) ?: "", listOf(uri.toURI()))
-          } // All other mime types
+          }
         }
         else -> {
           val uri = intent.getParcelableExtra<Parcelable>(Intent.EXTRA_STREAM) as? Uri
@@ -464,17 +475,15 @@ fun processExternalIntent(intent: Intent?) {
       }
     }
     Intent.ACTION_SEND_MULTIPLE -> {
-      // Close active chat and show a list of chats
       chatModel.chatId.value = null
       chatModel.clearOverlays.value = true
-      Log.e(TAG, "ACTION_SEND_MULTIPLE ${intent.type}")
       when {
         isMediaIntent(intent) -> {
           val uris = intent.getParcelableArrayListExtra<Parcelable>(Intent.EXTRA_STREAM) as? List<Uri>
           if (uris != null) {
             if (uris.any { it.scheme != "content" }) return showWrongUriAlert()
             chatModel.sharedContent.value = SharedContent.Media(intent.getStringExtra(Intent.EXTRA_TEXT) ?: "", uris.map { it.toURI() })
-          } // All other mime types
+          }
         }
         else -> {}
       }
