@@ -289,7 +289,7 @@ fun bindCamera(previewView: PreviewView) {
                 .requireLensFacing(lensFacing)
                 .build()
 
-            // 2. Проверяем аппаратную поддержку вендорского ночного режима (Google Night Sight, Samsung Nightography и т.д.)
+            // 2. Проверяем поддержку вендорского ночного режима
             val isNightSupported = extensionsManager.isExtensionAvailable(baseSelector, androidx.camera.extensions.ExtensionMode.NIGHT)
             val isVendorNightActive = isNightSightActive && isNightSupported
 
@@ -299,106 +299,7 @@ fun bindCamera(previewView: PreviewView) {
                 baseSelector
             }
 
-            // Получаем характеристики сенсора для аппаратной стабилизации
-            val cameraInfo = cameraProvider.getCameraInfo(baseSelector)
-            val camera2Info = Camera2CameraInfo.from(cameraInfo)
-
-            val availableStabilizationModes = camera2Info.getCameraCharacteristic(
-                CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
-            ) ?: intArrayOf()
-
-            val availableOisModes = camera2Info.getCameraCharacteristic(
-                CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
-            ) ?: intArrayOf()
-
-            val supportsOis = availableOisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
-
-            // 3. Превью (видоискатель) со стабилизацией OIS и EIS
-            val previewBuilder = Preview.Builder()
-            val camera2Preview = Camera2Interop.Extender(previewBuilder)
-
-            if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
-                camera2Preview.setCaptureRequestOption(
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                )
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION)
-            ) {
-                camera2Preview.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
-                )
-            } else if (availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
-                camera2Preview.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                )
-            }
-
-            val preview = previewBuilder.build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-
-            // 4. Фотозахват (ImageCapture)
-            val captureBuilder = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-
-            val camera2Capture = Camera2Interop.Extender(captureBuilder)
-
-            if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
-                camera2Capture.setCaptureRequestOption(
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                )
-            }
-
-            val imageCapture = captureBuilder.build()
-            currentImageCapture = imageCapture
-
-            // 5. Видеозахват (Recorder)
-            val qualitySelector = QualitySelector.from(
-                Quality.HD,
-                FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
-            )
-            val recorder = Recorder.Builder()
-                .setQualitySelector(qualitySelector)
-                .setExecutor(cameraExecutor)
-                .build()
-
-            val videoCapture = VideoCapture.withOutput(recorder)
-            currentVideoCapture = videoCapture
-
-            // 6. ViewPort под 4:3 или 1:1
-            val targetRational = if (selectedAspectRatio == "1:1") {
-                android.util.Rational(1, 1)
-            } else {
-                android.util.Rational(3, 4)
-            }
-
-            val rotation = previewView.display?.rotation
-                ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation
-                ?: android.view.Surface.ROTATION_0
-
-            val viewPort = androidx.camera.core.ViewPort.Builder(targetRational, rotation)
-                .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
-                .build()
-
-            // КРИТИЧЕСКИЙ МОМЕНТ: Вендорский ночной режим CameraX не допускает наличие VideoCapture.
-            // Подключаем видео только в обычном (дневном) режиме.
-            val useCaseGroupBuilder = androidx.camera.core.UseCaseGroup.Builder()
-                .setViewPort(viewPort)
-                .addUseCase(preview)
-                .addUseCase(imageCapture)
-
-            if (!isVendorNightActive) {
-                useCaseGroupBuilder.addUseCase(videoCapture)
-            }
-
-            val useCaseGroup = useCaseGroupBuilder.build()
-
+            // Хелпер для подписки на зум и настройки экспозиции
             fun configureActiveCamera(camera: androidx.camera.core.Camera) {
                 currentCamera = camera
 
@@ -415,51 +316,141 @@ fun bindCamera(previewView: PreviewView) {
 
             try {
                 cameraProvider.unbindAll()
-                val camera = cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    finalCameraSelector,
-                    useCaseGroup
-                )
-                configureActiveCamera(camera)
-            } catch (e: Exception) {
-                android.util.Log.e("CameraActivity", "Error binding with ViewPort, falling back to direct binding", e)
-                try {
-                    // Резервный запуск без ViewPort: разделяем сценарии с видео и без видео
-                    cameraProvider.unbindAll()
-                    val camera = if (isVendorNightActive) {
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            finalCameraSelector,
-                            preview,
-                            imageCapture
-                        )
-                    } else {
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            finalCameraSelector,
-                            preview,
-                            imageCapture,
-                            videoCapture
-                        )
+
+                if (isVendorNightActive) {
+                    // =================================================================
+                    // ВЕНДОРСКИЙ NIGHT SIGHT ДЛЯ PIXEL / GOOGLE TENSOR:
+                    // 1. Без Camera2Interop (иначе HAL выбивает ошибку сессии).
+                    // 2. Без VideoCapture (Camera Extensions не поддерживают видеопоток).
+                    // 3. Без стороннего кастомного ViewPort.
+                    // =================================================================
+                    val nightPreview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
                     }
+
+                    val nightCapture = ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .build()
+
+                    currentImageCapture = nightCapture
+                    currentVideoCapture = null // Отключаем видео в ночном режиме
+
+                    val camera = cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        finalCameraSelector,
+                        nightPreview,
+                        nightCapture
+                    )
                     configureActiveCamera(camera)
-                } catch (fatalExtension: Exception) {
-                    android.util.Log.e("CameraActivity", "Extension binding failed, falling back to base camera", fatalExtension)
-                    try {
-                        // Аварийный запуск на стандартном селекторе, если драйвер отклонил расширение
-                        cameraProvider.unbindAll()
-                        val fallbackCamera = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            baseSelector,
-                            preview,
-                            imageCapture,
-                            videoCapture
+                    android.util.Log.d("CameraActivity", "Vendor Night Sight successfully bound!")
+
+                } else {
+                    // =================================================================
+                    // ДНЕВНОЙ РЕЖИМ (ФОТО + ВИДЕО + OIS / EIS + VIEWPORT)
+                    // =================================================================
+                    val cameraInfo = cameraProvider.getCameraInfo(baseSelector)
+                    val camera2Info = Camera2CameraInfo.from(cameraInfo)
+
+                    val availableStabilizationModes = camera2Info.getCameraCharacteristic(
+                        CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+                    ) ?: intArrayOf()
+
+                    val availableOisModes = camera2Info.getCameraCharacteristic(
+                        CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
+                    ) ?: intArrayOf()
+
+                    val supportsOis = availableOisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+
+                    // Превью с OIS и EIS
+                    val previewBuilder = Preview.Builder()
+                    val camera2Preview = Camera2Interop.Extender(previewBuilder)
+
+                    if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
+                        camera2Preview.setCaptureRequestOption(
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                         )
-                        configureActiveCamera(fallbackCamera)
-                    } catch (fatal: Exception) {
-                        android.util.Log.e("CameraActivity", "Fatal camera binding error", fatal)
                     }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION)
+                    ) {
+                        camera2Preview.setCaptureRequestOption(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
+                        )
+                    } else if (availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+                        camera2Preview.setCaptureRequestOption(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                        )
+                    }
+
+                    val preview = previewBuilder.build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+
+                    // Фотозахват
+                    val captureBuilder = ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+
+                    val camera2Capture = Camera2Interop.Extender(captureBuilder)
+
+                    if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
+                        camera2Capture.setCaptureRequestOption(
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                        )
+                    }
+
+                    val imageCapture = captureBuilder.build()
+                    currentImageCapture = imageCapture
+
+                    // Видеозахват
+                    val qualitySelector = QualitySelector.from(
+                        Quality.HD,
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
+                    )
+                    val recorder = Recorder.Builder()
+                        .setQualitySelector(qualitySelector)
+                        .setExecutor(cameraExecutor)
+                        .build()
+
+                    val videoCapture = VideoCapture.withOutput(recorder)
+                    currentVideoCapture = videoCapture
+
+                    // ViewPort (4:3 или 1:1)
+                    val targetRational = if (selectedAspectRatio == "1:1") {
+                        android.util.Rational(1, 1)
+                    } else {
+                        android.util.Rational(3, 4)
+                    }
+
+                    val rotation = previewView.display?.rotation
+                        ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation
+                        ?: android.view.Surface.ROTATION_0
+
+                    val viewPort = androidx.camera.core.ViewPort.Builder(targetRational, rotation)
+                        .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
+                        .build()
+
+                    val useCaseGroup = androidx.camera.core.UseCaseGroup.Builder()
+                        .setViewPort(viewPort)
+                        .addUseCase(preview)
+                        .addUseCase(imageCapture)
+                        .addUseCase(videoCapture)
+                        .build()
+
+                    val camera = cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        baseSelector,
+                        useCaseGroup
+                    )
+                    configureActiveCamera(camera)
                 }
+
+            } catch (e: Exception) {
+                android.util.Log.e("CameraActivity", "Fatal camera binding error", e)
             }
         }, ContextCompat.getMainExecutor(context))
     }, ContextCompat.getMainExecutor(context))
