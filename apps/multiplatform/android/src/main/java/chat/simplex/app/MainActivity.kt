@@ -246,7 +246,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         "50 Servers (Mid)",
                         "100 Servers (High)",
                         "All available (Ultra)",
-                        "Custom VLESS / link"
+                        "Custom VLESS / Subscription"
                     )
 
                     var selectedIndex by remember {
