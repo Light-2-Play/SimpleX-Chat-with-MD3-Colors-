@@ -128,11 +128,11 @@ class MainActivity: FragmentActivity() {
         try {
           SingBoxService.start(this@MainActivity)
         } catch (e: Throwable) {
-          android.util.Log.e("SimpleXMod", "Ошибка запуска SingBox", e)
+          android.util.Log.e("SimpleXMod", "SingBox Startup Error", e)
         }
       }, 1000)
     } catch (e: Throwable) {
-      android.util.Log.e("SimpleXMod", "Сбой вызова Handler", e)
+      android.util.Log.e("SimpleXMod", "Handler Call failure", e)
     }
 
     enableEdgeToEdge()
@@ -306,11 +306,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false }) {
-                            Text("Отключить", color = colors.primary)
+                            Text("Disable", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         TextButton(onClick = { showSingBoxDialogState.value = false }) {
-                            Text("Отмена", color = colors.primary)
+                            Text("Cancel", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -330,7 +330,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 contentColor = colors.onPrimary
                             )
                         ) {
-                            Text(if (isRunning) "Применить" else "Включить")
+                            Text(if (isRunning) "Apply" else "Turn On")
                         }
                     }
                 }
@@ -380,7 +380,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = { showCustomInputDialog = false }) {
-                            Text("Назад", color = colors.primary)
+                            Text("Back", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -400,7 +400,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 contentColor = colors.onPrimary
                             )
                         ) {
-                            Text("Подключить")
+                            Text("Connect")
                         }
                     }
                 }
