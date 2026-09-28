@@ -138,9 +138,7 @@ class MainActivity: FragmentActivity() {
     enableEdgeToEdge()
 
     setContent {
-      // Подключаем наш диалог поверх всего приложения
       SingBoxComposeDialogs(this@MainActivity)
-      
       AppScreen()
     }
 
@@ -203,7 +201,7 @@ class MainActivity: FragmentActivity() {
 }
 
 // =====================================================================
-// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (МАТЕРИАЛ 2 + MONET)
+// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (ДИНАМИЧЕСКИЙ MONET)
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
@@ -212,13 +210,15 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
     val colors = CurrentColors.value.colors
     var showCustomInputDialog by remember { mutableStateOf(false) }
 
-    // Основной диалог
+    // Основной диалог выбора серверов
     if (!showCustomInputDialog) {
         Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colors.surface,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.onSurface.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
@@ -240,13 +240,13 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    val limits = listOf(25, 50, 100, 0, -1) // -1 это Custom
+                    val limits = listOf(25, 50, 100, 0, -1)
                     val options = listOf(
-                        "25 servers (Lite)",
-                        "50 servers (Mid)",
-                        "100 servers (High)",
+                        "25 Servers (Lite)",
+                        "50 Servers (Mid)",
+                        "100 Servers (High)",
                         "All available (Ultra)",
-                        "Custom VLESS / Subscription"
+                        "Custom VLESS / link"
                     )
 
                     var selectedIndex by remember {
@@ -259,64 +259,72 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     }
 
                     options.forEachIndexed { index, text ->
+                        val isSelected = selectedIndex == index
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) colors.primary.copy(alpha = 0.14f) else Color.Transparent
+                                )
                                 .clickable { selectedIndex = index }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                                .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Кастомная радио-кнопка в цветах Monet
+                            // Динамическая радио-кнопка
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .background(
-                                        color = if (selectedIndex == index) colors.primary else Color.Transparent,
-                                        shape = CircleShape
-                                    )
                                     .border(
                                         width = 2.dp,
-                                        color = if (selectedIndex == index) colors.primary else colors.onSurface.copy(alpha = 0.5f),
+                                        color = if (isSelected) colors.primary else colors.onSurface.copy(alpha = 0.45f),
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (selectedIndex == index) {
+                                if (isSelected) {
                                     Box(
                                         modifier = Modifier
                                             .size(10.dp)
-                                            .background(colors.onPrimary, CircleShape)
+                                            .background(colors.primary, CircleShape)
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(modifier = Modifier.width(14.dp))
                             Text(
                                 text = text,
-                                color = colors.onSurface,
-                                fontSize = 16.sp
+                                color = if (isSelected) colors.primary else colors.onSurface,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 15.sp
                             )
+                        }
+                        if (index < options.lastIndex) {
+                            Spacer(modifier = Modifier.height(2.dp))
                         }
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    // Овальные динамические кнопки действий
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
                             onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false },
-                            shape = CircleShape 
+                            shape = CircleShape,
+                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Disable", color = colors.primary)
+                            Text("Disable", fontWeight = FontWeight.Medium)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         TextButton(
                             onClick = { showSingBoxDialogState.value = false },
-                            shape = CircleShape 
+                            shape = CircleShape,
+                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Cancel", color = colors.primary)
+                            Text("Cancel", fontWeight = FontWeight.Medium)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -335,21 +343,27 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = colors.primary,
                                 contentColor = colors.onPrimary
-                            )
+                            ),
+                            elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
-                            Text(if (isRunning) "Apply" else "Turn On")
+                            Text(
+                                text = if (isRunning) "Apply" else "Turn On",
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
             }
         }
     } else {
-        // Диалог ввода кастомного ключа
+        // Диалог ввода ссылки / ключа
         Dialog(onDismissRequest = { showCustomInputDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colors.surface,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.onSurface.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text(
@@ -365,10 +379,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... or https://...") },
+                        placeholder = { Text("vless://... or https://...", color = colors.onSurface.copy(alpha = 0.45f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             textColor = colors.onSurface,
-                            placeholderColor = colors.onSurface.copy(alpha = 0.5f),
+                            placeholderColor = colors.onSurface.copy(alpha = 0.45f),
                             backgroundColor = colors.background,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
@@ -377,7 +391,8 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(120.dp)
-                            .clip(RoundedCornerShape(16.dp)),
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(1.dp, colors.onSurface.copy(alpha = 0.12f), RoundedCornerShape(16.dp)),
                         maxLines = 5
                     )
 
@@ -385,13 +400,15 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
                             onClick = { showCustomInputDialog = false },
-                            shape = CircleShape
+                            shape = CircleShape,
+                            colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Back", color = colors.primary)
+                            Text("Back", fontWeight = FontWeight.Medium)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -410,9 +427,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = colors.primary,
                                 contentColor = colors.onPrimary
-                            )
+                            ),
+                            elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
-                            Text("Connect")
+                            Text("Connect", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
