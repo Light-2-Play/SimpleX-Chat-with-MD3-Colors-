@@ -203,7 +203,7 @@ dependencies {
 
     // Модуль OEM-расширений (ночной режим, HDR, боке)
     implementation("androidx.camera:camera-extensions:$cameraxVersion")
-
+}
 tasks {
     val compressApk by creating {
         doLast {
