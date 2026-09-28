@@ -275,186 +275,177 @@ class CameraActivity : ComponentActivity() { // или AppCompatActivity
 
         @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 fun bindCamera(previewView: PreviewView) {
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
+    cameraProviderFuture.addListener({
+        val cameraProvider = cameraProviderFuture.get()
 
-               val baseSelector = CameraSelector.Builder()
-                    .requireLensFacing(lensFacing)
-                    .build()
+        // 1. Инициализируем ExtensionsManager для аппаратного OEM-режима
+        val extensionsManagerFuture = androidx.camera.extensions.ExtensionsManager.getInstanceAsync(context, cameraProvider)
+        extensionsManagerFuture.addListener({
+            val extensionsManager = extensionsManagerFuture.get()
 
-                // Получаем характеристики текущего сенсора
-                val cameraInfo = cameraProvider.getCameraInfo(baseSelector)
-                val camera2Info = Camera2CameraInfo.from(cameraInfo)
-                
-                val availableStabilizationModes = camera2Info.getCameraCharacteristic(
-                    CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
-                ) ?: intArrayOf()
+            val baseSelector = CameraSelector.Builder()
+                .requireLensFacing(lensFacing)
+                .build()
 
-                val availableOisModes = camera2Info.getCameraCharacteristic(
-                    CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
-                ) ?: intArrayOf()
+            // 2. Проверяем аппаратную поддержку вендорского ночного режима (Google Night Sight, Samsung Nightography и т.д.)
+            val isNightSupported = extensionsManager.isExtensionAvailable(baseSelector, androidx.camera.extensions.ExtensionMode.NIGHT)
+            val finalCameraSelector = if (isNightSightActive && isNightSupported) {
+                extensionsManager.getExtensionEnabledCameraSelector(baseSelector, androidx.camera.extensions.ExtensionMode.NIGHT)
+            } else {
+                baseSelector
+            }
 
-                // 1. Превью (видоискатель)
-                val previewBuilder = Preview.Builder()
-                val camera2Preview = Camera2Interop.Extender(previewBuilder)
+            // Получаем характеристики сенсора для аппаратной стабилизации
+            val cameraInfo = cameraProvider.getCameraInfo(baseSelector)
+            val camera2Info = Camera2CameraInfo.from(cameraInfo)
 
-                // Оптическая стабилизация (OIS) — включаем, если модуль есть физически
-                val supportsOis = availableOisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
-                if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
-                    camera2Preview.setCaptureRequestOption(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    )
-                }
+            val availableStabilizationModes = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+            ) ?: intArrayOf()
 
-                // Электронная стабилизация (EIS) для превью и видео:
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION)
-                ) {
-                    // Android 13+: стабилизирует превью видоискателя и видеопоток синхронно
-                    camera2Preview.setCaptureRequestOption(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
-                    )
-                } else if (availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
-                    // Стандартный EIS для видеопотока
-                    camera2Preview.setCaptureRequestOption(
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                    )
-                }
+            val availableOisModes = camera2Info.getCameraCharacteristic(
+                CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
+            ) ?: intArrayOf()
 
-                // Настройки превью в ночном режиме
-                if (isNightSightActive) {
-                    camera2Preview.setCaptureRequestOption(
-                        CaptureRequest.NOISE_REDUCTION_MODE,
-                        CaptureRequest.NOISE_REDUCTION_MODE_FAST
-                    )
-                }
+            val supportsOis = availableOisModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
 
-                val preview = previewBuilder.build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-                // 2. Фотозахват (максимальное качество)
-                val captureBuilder = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            // 3. Превью (видоискатель) со стабилизацией OIS и EIS
+            val previewBuilder = Preview.Builder()
+            val camera2Preview = Camera2Interop.Extender(previewBuilder)
 
-                val camera2Capture = Camera2Interop.Extender(captureBuilder)
-
-                if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                    camera2Capture.setCaptureRequestOption(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    )
-                }
-
-                if (isNightSightActive) {
-                    camera2Capture.setCaptureRequestOption(
-                        CaptureRequest.NOISE_REDUCTION_MODE,
-                        CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
-                    )
-                    camera2Capture.setCaptureRequestOption(
-                        CaptureRequest.HOT_PIXEL_MODE,
-                        CaptureRequest.HOT_PIXEL_MODE_HIGH_QUALITY
-                    )
-                    camera2Capture.setCaptureRequestOption(
-                        CaptureRequest.EDGE_MODE,
-                        CaptureRequest.EDGE_MODE_HIGH_QUALITY
-                    )
-                    camera2Capture.setCaptureRequestOption(
-                        CaptureRequest.TONEMAP_MODE,
-                        CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
-                    )
-                }
-
-                val imageCapture = captureBuilder.build()
-                currentImageCapture = imageCapture
-
-                // 3. Видеозахват (720p HD, энкодер работает в фоне на cameraExecutor)
-                val qualitySelector = QualitySelector.from(
-                    Quality.HD,
-                    FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
+            if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
+                camera2Preview.setCaptureRequestOption(
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                 )
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(qualitySelector)
-                    .setExecutor(cameraExecutor)
-                    .build()
+            }
 
-                val videoCapture = VideoCapture.withOutput(recorder)
-                currentVideoCapture = videoCapture
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION)
+            ) {
+                camera2Preview.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_PREVIEW_STABILIZATION
+                )
+            } else if (availableStabilizationModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+                camera2Preview.setCaptureRequestOption(
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                )
+            }
 
-                // 4. Единый ViewPort под 4:3 или 1:1
-                val targetRational = if (selectedAspectRatio == "1:1") {
-                    android.util.Rational(1, 1)
-                } else {
-                    android.util.Rational(3, 4)
+            val preview = previewBuilder.build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+
+            // 4. Фотозахват (ImageCapture)
+            val captureBuilder = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+
+            val camera2Capture = Camera2Interop.Extender(captureBuilder)
+
+            if (supportsOis && lensFacing == CameraSelector.LENS_FACING_BACK) {
+                camera2Capture.setCaptureRequestOption(
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                )
+            }
+
+            val imageCapture = captureBuilder.build()
+            currentImageCapture = imageCapture
+
+            // 5. Видеозахват (Recorder)
+            val qualitySelector = QualitySelector.from(
+                Quality.HD,
+                FallbackStrategy.lowerQualityOrHigherThan(Quality.HD)
+            )
+            val recorder = Recorder.Builder()
+                .setQualitySelector(qualitySelector)
+                .setExecutor(cameraExecutor)
+                .build()
+
+            val videoCapture = VideoCapture.withOutput(recorder)
+            currentVideoCapture = videoCapture
+
+            // 6. ViewPort под 4:3 или 1:1
+            val targetRational = if (selectedAspectRatio == "1:1") {
+                android.util.Rational(1, 1)
+            } else {
+                android.util.Rational(3, 4)
+            }
+
+            val rotation = previewView.display?.rotation
+                ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation
+                ?: android.view.Surface.ROTATION_0
+
+            val viewPort = androidx.camera.core.ViewPort.Builder(targetRational, rotation)
+                .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
+                .build()
+
+            val useCaseGroup = androidx.camera.core.UseCaseGroup.Builder()
+                .setViewPort(viewPort)
+                .addUseCase(preview)
+                .addUseCase(imageCapture)
+                .addUseCase(videoCapture)
+                .build()
+
+            fun configureActiveCamera(camera: androidx.camera.core.Camera) {
+                currentCamera = camera
+
+                camera.cameraInfo.zoomState.observe(lifecycleOwner) { state ->
+                    minZoomRatio = state.minZoomRatio
+                    maxZoomRatio = state.maxZoomRatio
                 }
 
-                val rotation = previewView.display?.rotation 
-                    ?: (context as? Activity)?.windowManager?.defaultDisplay?.rotation 
-                    ?: android.view.Surface.ROTATION_0
-
-                val viewPort = androidx.camera.core.ViewPort.Builder(targetRational, rotation)
-                    .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
-                    .build()
-
-                val useCaseGroup = androidx.camera.core.UseCaseGroup.Builder()
-                    .setViewPort(viewPort)
-                    .addUseCase(preview)
-                    .addUseCase(imageCapture)
-                    .addUseCase(videoCapture)
-                    .build()
-
-                // Хелпер для подписки на зум и выставления экспозиции
-                fun configureActiveCamera(camera: androidx.camera.core.Camera) {
-                    currentCamera = camera
-
-                    camera.cameraInfo.zoomState.observe(lifecycleOwner) { state ->
-                        minZoomRatio = state.minZoomRatio
-                        maxZoomRatio = state.maxZoomRatio
-                    }
-
-                    val exposureState = camera.cameraInfo.exposureState
-                    if (exposureState.isExposureCompensationSupported) {
-                        val range = exposureState.exposureCompensationRange
-                        val targetIndex = if (isNightSightActive) {
-                            (range.upper * 0.4f).toInt().coerceIn(range.lower, range.upper)
-                        } else {
-                            0
-                        }
-                        camera.cameraControl.setExposureCompensationIndex(targetIndex)
-                    }
+                // В вендорском ночном режиме экспозицией полностью управляет алгоритм прошивки
+                val exposureState = camera.cameraInfo.exposureState
+                if (exposureState.isExposureCompensationSupported && !isNightSightActive) {
+                    camera.cameraControl.setExposureCompensationIndex(0)
                 }
+            }
 
+            try {
+                cameraProvider.unbindAll()
+                val camera = cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    finalCameraSelector,
+                    useCaseGroup
+                )
+                configureActiveCamera(camera)
+            } catch (e: Exception) {
+                android.util.Log.e("CameraActivity", "Error binding with ViewPort, falling back to direct binding", e)
                 try {
-                    cameraProvider.unbindAll()
+                    // Резервный запуск: если вендорский режим не поддерживает одновременную связку ViewPort/Video
                     val camera = cameraProvider.bindToLifecycle(
                         lifecycleOwner,
-                        baseSelector,
-                        useCaseGroup
+                        finalCameraSelector,
+                        preview,
+                        imageCapture,
+                        videoCapture
                     )
                     configureActiveCamera(camera)
-                } catch (e: Exception) {
-                    android.util.Log.e("CameraActivity", "Error binding with ViewPort, falling back to direct binding", e)
+                } catch (fatalExtension: Exception) {
+                    android.util.Log.e("CameraActivity", "Extension binding failed, falling back to base camera", fatalExtension)
                     try {
-                        // Резервный запуск без кастомного ViewPort, если HAL отклонил связку
-                        val camera = cameraProvider.bindToLifecycle(
+                        // Аварийный запуск на стандартном селекторе, если вендорский HAL отклонил вызов
+                        val fallbackCamera = cameraProvider.bindToLifecycle(
                             lifecycleOwner,
                             baseSelector,
                             preview,
                             imageCapture,
                             videoCapture
                         )
-                        configureActiveCamera(camera)
+                        configureActiveCamera(fallbackCamera)
                     } catch (fatal: Exception) {
                         android.util.Log.e("CameraActivity", "Fatal camera binding error", fatal)
                     }
                 }
-            }, ContextCompat.getMainExecutor(context))
-        }
-
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }, ContextCompat.getMainExecutor(context))
+}
 // 2. И только ПОД НЕЙ вызывается LaunchedEffect:
         LaunchedEffect(lensFacing, isNightSightActive, selectedAspectRatio, cachedPreviewView) {
             cachedPreviewView?.let { pv ->
