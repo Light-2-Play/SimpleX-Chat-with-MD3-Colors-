@@ -867,13 +867,13 @@ fun bindCamera(previewView: PreviewView) {
     } // Закрывает Box экрана
 } // Закрывает функцию CameraScreen <--- УБЕДИТЕСЬ, ЧТО ЗДЕСЬ ЕСТЬ ЭТА СКОБКА
     
-    // Функция сохранения фото теперь снаружи (как положено)
+   // Функция сохранения фото (теперь полностью на вендорском драйвере)
     private fun takePhoto(
         imageCapture: ImageCapture,
-        camera: Camera?,
-        isNightMode: Boolean,
-        scope: kotlinx.coroutines.CoroutineScope,
-        onProgress: (Int) -> Unit,
+        camera: androidx.camera.core.Camera? = null,
+        isNightMode: Boolean = false,
+        scope: kotlinx.coroutines.CoroutineScope? = null,
+        onProgress: ((Int) -> Unit)? = null,
         onSuccess: () -> Unit,
         onError: (Exception) -> Unit
     ) {
@@ -906,36 +906,21 @@ fun bindCamera(previewView: PreviewView) {
             }
         }
 
-        if (isNightMode && camera != null) {
-            scope.launch {
-                try {
-                    NightSightConfig.captureMultiFrameNightSight(
-                        context = this@CameraActivity,
-                        camera = camera,
-                        imageCapture = imageCapture,
-                        outputFile = photoFile,
-                        onProgress = { progress -> runOnUiThread { onProgress(progress) } }
-                    )
+        // Вендорский драйвер сам сделает ночную выдержку и обработку через ISP,
+        // если камера была привязана с ExtensionMode.NIGHT
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        imageCapture.takePicture(
+            outputOptions,
+            cameraExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     deliverSuccess()
-                } catch (e: Exception) {
-                    runOnUiThread { onError(e) }
+                }
+
+                override fun onError(exc: ImageCaptureException) {
+                    runOnUiThread { onError(exc) }
                 }
             }
-        } else {
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-            imageCapture.takePicture(
-                outputOptions,
-                cameraExecutor,
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        deliverSuccess()
-                    }
-
-                    override fun onError(exc: ImageCaptureException) {
-                        runOnUiThread { onError(exc) }
-                    }
-                }
-            )
-        }
+        )
     }
-} // Финальная скобка закрывает класс CameraActivity
+}
