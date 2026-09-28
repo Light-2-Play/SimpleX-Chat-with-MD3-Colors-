@@ -291,7 +291,9 @@ fun bindCamera(previewView: PreviewView) {
 
             // 2. Проверяем аппаратную поддержку вендорского ночного режима (Google Night Sight, Samsung Nightography и т.д.)
             val isNightSupported = extensionsManager.isExtensionAvailable(baseSelector, androidx.camera.extensions.ExtensionMode.NIGHT)
-            val finalCameraSelector = if (isNightSightActive && isNightSupported) {
+            val isVendorNightActive = isNightSightActive && isNightSupported
+
+            val finalCameraSelector = if (isVendorNightActive) {
                 extensionsManager.getExtensionEnabledCameraSelector(baseSelector, androidx.camera.extensions.ExtensionMode.NIGHT)
             } else {
                 baseSelector
@@ -384,12 +386,18 @@ fun bindCamera(previewView: PreviewView) {
                 .setScaleType(androidx.camera.core.ViewPort.FILL_CENTER)
                 .build()
 
-            val useCaseGroup = androidx.camera.core.UseCaseGroup.Builder()
+            // КРИТИЧЕСКИЙ МОМЕНТ: Вендорский ночной режим CameraX не допускает наличие VideoCapture.
+            // Подключаем видео только в обычном (дневном) режиме.
+            val useCaseGroupBuilder = androidx.camera.core.UseCaseGroup.Builder()
                 .setViewPort(viewPort)
                 .addUseCase(preview)
                 .addUseCase(imageCapture)
-                .addUseCase(videoCapture)
-                .build()
+
+            if (!isVendorNightActive) {
+                useCaseGroupBuilder.addUseCase(videoCapture)
+            }
+
+            val useCaseGroup = useCaseGroupBuilder.build()
 
             fun configureActiveCamera(camera: androidx.camera.core.Camera) {
                 currentCamera = camera
@@ -399,7 +407,6 @@ fun bindCamera(previewView: PreviewView) {
                     maxZoomRatio = state.maxZoomRatio
                 }
 
-                // В вендорском ночном режиме экспозицией полностью управляет алгоритм прошивки
                 val exposureState = camera.cameraInfo.exposureState
                 if (exposureState.isExposureCompensationSupported && !isNightSightActive) {
                     camera.cameraControl.setExposureCompensationIndex(0)
@@ -417,19 +424,30 @@ fun bindCamera(previewView: PreviewView) {
             } catch (e: Exception) {
                 android.util.Log.e("CameraActivity", "Error binding with ViewPort, falling back to direct binding", e)
                 try {
-                    // Резервный запуск: если вендорский режим не поддерживает одновременную связку ViewPort/Video
-                    val camera = cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        finalCameraSelector,
-                        preview,
-                        imageCapture,
-                        videoCapture
-                    )
+                    // Резервный запуск без ViewPort: разделяем сценарии с видео и без видео
+                    cameraProvider.unbindAll()
+                    val camera = if (isVendorNightActive) {
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            finalCameraSelector,
+                            preview,
+                            imageCapture
+                        )
+                    } else {
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            finalCameraSelector,
+                            preview,
+                            imageCapture,
+                            videoCapture
+                        )
+                    }
                     configureActiveCamera(camera)
                 } catch (fatalExtension: Exception) {
                     android.util.Log.e("CameraActivity", "Extension binding failed, falling back to base camera", fatalExtension)
                     try {
-                        // Аварийный запуск на стандартном селекторе, если вендорский HAL отклонил вызов
+                        // Аварийный запуск на стандартном селекторе, если драйвер отклонил расширение
+                        cameraProvider.unbindAll()
                         val fallbackCamera = cameraProvider.bindToLifecycle(
                             lifecycleOwner,
                             baseSelector,
