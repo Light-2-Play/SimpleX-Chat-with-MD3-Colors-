@@ -203,7 +203,7 @@ class MainActivity: FragmentActivity() {
 }
 
 // =====================================================================
-// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (МАТЕРИАЛ 2)
+// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (МАТЕРИАЛ 2 + MONET)
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
@@ -218,12 +218,12 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colors.surface,
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
                     val isRunning = SingBoxService.isRunning
-                    val statusText = if (isRunning) "● VLESS is Active ($modeLabel)" else "○ VLESS Disable"
+                    val statusText = if (isRunning) "● VLESS active ($modeLabel)" else "○ VLESS disabled"
 
                     Text(
                         text = "VLESS Proxy Settings",
@@ -242,11 +242,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     val limits = listOf(25, 50, 100, 0, -1) // -1 это Custom
                     val options = listOf(
-                        "25 Servers (Lite)",
-                        "50 Servers (Mid)",
-                        "100 Servers (High)",
-                        "All Available (Ultra)",
-                        "Custom VLESS / Subscription (Recommended)"
+                        "25 servers (Lite)",
+                        "50 servers (Mid)",
+                        "100 servers (High)",
+                        "All available (Ultra)",
+                        "Custom VLESS / Subscription"
                     )
 
                     var selectedIndex by remember {
@@ -305,11 +305,17 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false }) {
+                        TextButton(
+                            onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false },
+                            shape = CircleShape 
+                        ) {
                             Text("Disable", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(onClick = { showSingBoxDialogState.value = false }) {
+                        TextButton(
+                            onClick = { showSingBoxDialogState.value = false },
+                            shape = CircleShape 
+                        ) {
                             Text("Cancel", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -325,6 +331,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
+                            shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = colors.primary,
                                 contentColor = colors.onPrimary
@@ -342,11 +349,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colors.surface,
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text(
-                        text = "Свой VLESS или ссылка",
+                        text = "Custom VLESS or link",
                         color = colors.onSurface,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -358,13 +365,14 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... или https://...") },
+                        placeholder = { Text("vless://... or https://...") },
                         colors = TextFieldDefaults.textFieldColors(
                             textColor = colors.onSurface,
                             placeholderColor = colors.onSurface.copy(alpha = 0.5f),
                             backgroundColor = colors.background,
                             focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
+                            unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = colors.primary
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -379,7 +387,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { showCustomInputDialog = false }) {
+                        TextButton(
+                            onClick = { showCustomInputDialog = false },
+                            shape = CircleShape
+                        ) {
                             Text("Back", color = colors.primary)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -395,6 +406,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
+                            shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = colors.primary,
                                 contentColor = colors.onPrimary
