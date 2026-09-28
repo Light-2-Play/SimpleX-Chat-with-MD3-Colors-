@@ -12,11 +12,12 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -202,7 +203,7 @@ class MainActivity: FragmentActivity() {
 }
 
 // =====================================================================
-// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (ИДЕАЛЬНАЯ ТЕМА MD3)
+// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (МАТЕРИАЛ 2)
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
@@ -222,7 +223,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
                     val isRunning = SingBoxService.isRunning
-                    val statusText = if (isRunning) "● VLESS is active ($modeLabel)" else "○ VLESS Disable"
+                    val statusText = if (isRunning) "● VLESS is Active ($modeLabel)" else "○ VLESS Disable"
 
                     Text(
                         text = "VLESS Proxy Settings",
@@ -245,7 +246,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         "50 Servers (Mid)",
                         "100 Servers (High)",
                         "All Available (Ultra)",
-                        "VLESS Key / Subscription"
+                        "Custom VLESS / Subscription (Recommended)"
                     )
 
                     var selectedIndex by remember {
@@ -274,7 +275,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                         color = if (selectedIndex == index) colors.primary else Color.Transparent,
                                         shape = CircleShape
                                     )
-                                    .androidx.compose.foundation.border(
+                                    .border(
                                         width = 2.dp,
                                         color = if (selectedIndex == index) colors.primary else colors.onSurface.copy(alpha = 0.5f),
                                         shape = CircleShape
@@ -324,7 +325,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = colors.primary,
+                                contentColor = colors.onPrimary
+                            )
                         ) {
                             Text(if (isRunning) "Применить" else "Включить")
                         }
@@ -354,12 +358,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... или https://...", color = colors.onSurface.copy(alpha = 0.5f)) },
-                        colors = TextFieldDefaults.colors(
-                            focusedTextColor = colors.onSurface,
-                            unfocusedTextColor = colors.onSurface,
-                            focusedContainerColor = colors.background,
-                            unfocusedContainerColor = colors.background,
+                        placeholder = { Text("vless://... или https://...") },
+                        colors = TextFieldDefaults.textFieldColors(
+                            textColor = colors.onSurface,
+                            placeholderColor = colors.onSurface.copy(alpha = 0.5f),
+                            backgroundColor = colors.background,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent
                         ),
@@ -392,7 +395,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary)
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = colors.primary,
+                                contentColor = colors.onPrimary
+                            )
                         ) {
                             Text("Подключить")
                         }
