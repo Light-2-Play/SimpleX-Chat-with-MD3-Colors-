@@ -207,6 +207,7 @@ class MainActivity: FragmentActivity() {
 fun SingBoxComposeDialogs(activity: MainActivity) {
     if (!showSingBoxDialogState.value) return
 
+    // Берем те самые динамические цвета Monet, которые вы настроили в onCreate()
     val colors = CurrentColors.value.colors
     var showCustomInputDialog by remember { mutableStateOf(false) }
 
@@ -215,10 +216,8 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
         Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = colors.surface,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, colors.onSurface.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
+                color = colors.surface, // Динамический фон (system_neutral1_800/100)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
@@ -246,7 +245,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         "50 Servers (Mid)",
                         "100 Servers (High)",
                         "All available (Ultra)",
-                        "Custom VLESS / Subscription"
+                        "Custom VLESS / link"
                     )
 
                     var selectedIndex by remember {
@@ -265,13 +264,14 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
-                                    if (isSelected) colors.primary.copy(alpha = 0.14f) else Color.Transparent
+                                    // Подсветка плашки динамическим акцентом (system_accent1_200/600)
+                                    if (isSelected) colors.primary.copy(alpha = 0.15f) else Color.Transparent
                                 )
                                 .clickable { selectedIndex = index }
                                 .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Динамическая радио-кнопка
+                            // Динамическая радио-кнопка (круг)
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
@@ -283,6 +283,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isSelected) {
+                                    // Динамическая радио-кнопка (внутренняя точка)
                                     Box(
                                         modifier = Modifier
                                             .size(10.dp)
@@ -316,7 +317,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             shape = CircleShape,
                             colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Disable", fontWeight = FontWeight.Medium)
+                            Text("Disable", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         TextButton(
@@ -324,7 +325,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             shape = CircleShape,
                             colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Cancel", fontWeight = FontWeight.Medium)
+                            Text("Cancel", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -339,10 +340,10 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                     showSingBoxDialogState.value = false
                                 }
                             },
-                            shape = CircleShape,
+                            shape = CircleShape, // Овальная форма
                             colors = ButtonDefaults.buttonColors(
-                                backgroundColor = colors.primary,
-                                contentColor = colors.onPrimary
+                                backgroundColor = colors.primary, // Заливка акцентом
+                                contentColor = colors.onPrimary   // Текст внутри акцента (onPrimary)
                             ),
                             elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
@@ -361,9 +362,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colors.surface,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, colors.onSurface.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(24.dp)) {
                     Text(
@@ -383,7 +382,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         colors = TextFieldDefaults.textFieldColors(
                             textColor = colors.onSurface,
                             placeholderColor = colors.onSurface.copy(alpha = 0.45f),
-                            backgroundColor = colors.background,
+                            backgroundColor = colors.background, // Чуть темнее (или светлее), чтобы выделялось
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
                             cursorColor = colors.primary
@@ -391,8 +390,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(120.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(1.dp, colors.onSurface.copy(alpha = 0.12f), RoundedCornerShape(16.dp)),
+                            .clip(RoundedCornerShape(16.dp)),
                         maxLines = 5
                     )
 
@@ -408,7 +406,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             shape = CircleShape,
                             colors = ButtonDefaults.textButtonColors(contentColor = colors.primary)
                         ) {
-                            Text("Back", fontWeight = FontWeight.Medium)
+                            Text("Back", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
