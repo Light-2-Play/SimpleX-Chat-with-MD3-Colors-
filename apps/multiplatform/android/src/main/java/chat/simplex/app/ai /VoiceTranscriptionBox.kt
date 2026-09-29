@@ -43,7 +43,6 @@ fun VoiceTranscriptionBox(
 
     var showDownloadDialog by remember { mutableStateOf(false) }
 
-    // Если модель еще не скачана — показываем наш диалог загрузки
     if (showDownloadDialog) {
         WhisperDownloadDialog(
             downloader = downloader,
@@ -59,17 +58,17 @@ fun VoiceTranscriptionBox(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // Кнопка транскрипции (показывается, если текст еще не расшифрован)
         if (transcribedText == null) {
+            // Выравниваем строго по левому краю (Arrangement.Start) прямо под таймером
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (isLoading) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(end = 4.dp, top = 2.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(14.dp),
@@ -78,7 +77,7 @@ fun VoiceTranscriptionBox(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Распознавание...",
+                            text = "Transcribing...",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -96,21 +95,22 @@ fun VoiceTranscriptionBox(
                         },
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                        tonalElevation = 1.dp
+                        tonalElevation = 1.dp,
+                        modifier = Modifier.padding(top = 4.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "A→",
+                                text = "A →",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Текст",
+                                text = "Text",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
@@ -120,7 +120,6 @@ fun VoiceTranscriptionBox(
             }
         }
 
-        // Карточка с готовым текстом (появляется с плавной анимацией)
         AnimatedVisibility(
             visible = transcribedText != null,
             enter = fadeIn() + expandVertically()
@@ -136,7 +135,7 @@ fun VoiceTranscriptionBox(
                             onClick = {},
                             onLongClick = {
                                 clipboardManager.setText(AnnotatedString(text))
-                                Toast.makeText(context, "Текст скопирован", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
                             }
                         )
                 ) {
