@@ -169,6 +169,36 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// Автоматическое скачивание AAR-библиотеки sherpa-onnx, если ее нет локально
+val sherpaAarFile = file("libs/sherpa-onnx.aar")
+
+val downloadSherpaAar by tasks.registering {
+    outputs.file(sherpaAarFile)
+    doLast {
+        if (!sherpaAarFile.exists()) {
+            sherpaAarFile.parentFile.mkdirs()
+            println("--> Скачивание sherpa-onnx-1.13.8.aar из GitHub Releases...")
+            val url = java.net.URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 60_000
+
+            connection.inputStream.use { input ->
+                sherpaAarFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            println("--> sherpa-onnx.aar успешно загружен!")
+        }
+    }
+}
+
+// Запускать скачивание перед началом компиляции проекта
+tasks.matching { it.name.startsWith("pre") && it.name.endsWith("Build") }.configureEach {
+    dependsOn(downloadSherpaAar)
+}
+
 dependencies {
     implementation("com.google.guava:guava:31.1-android")
     implementation(project(":common"))
@@ -212,7 +242,7 @@ dependencies {
     implementation("androidx.camera:camera-extensions:$cameraxVersion")
 
 // Движок автономного распознавания речи (Next-gen Kaldi / ONNX)
-    implementation("com.github.k2-fsa:sherpa-onnx:v1.10.41")
+    implementation(files("libs/sherpa-onnx.aar"))
     
     // Корутины для фоновой обработки
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
