@@ -15,7 +15,7 @@ fun WhisperDownloadDialog(
     downloader: WhisperDownloader,
     initialModelType: WhisperModelType = WhisperModelType.TINY,
     onDismiss: () -> Unit,
-    onModelReady: () -> Unit
+    onModelReady: (WhisperModelType) -> Unit // Передаем тип скачанной модели
 ) {
     val downloadState by downloader.downloadState.collectAsState()
     var selectedType by remember { mutableStateOf(initialModelType) }
@@ -125,7 +125,7 @@ fun WhisperDownloadDialog(
                         )
                     }
 
-                    is DownloadState.Completed -> {
+                   is DownloadState.Completed -> {
                         Text(
                             text = "Model downloaded successfully!",
                             style = MaterialTheme.typography.bodyLarge,
@@ -133,7 +133,7 @@ fun WhisperDownloadDialog(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(onClick = {
-                            onModelReady()
+                            onModelReady(selectedType) // Передаем выбранную модель
                             onDismiss()
                         }) {
                             Text("Done")
