@@ -10,10 +10,7 @@ object VoiceTranscriptionManager {
     private var transcriber: WhisperTranscriber? = null
     private var downloader: WhisperDownloader? = null
 
-    // Кэш расшифрованных сообщений (ключ — абсолютный путь к аудиофайлу)
     val transcriptions = mutableStateMapOf<String, String>()
-
-    // Статусы выполнения (чтобы показывать спиннер на нужном сообщении)
     val loadingStates = mutableStateMapOf<String, Boolean>()
 
     fun getTranscriber(context: Context): WhisperTranscriber {
@@ -27,11 +24,9 @@ object VoiceTranscriptionManager {
     suspend fun transcribeAudio(
         context: Context,
         audioFile: File,
-        modelType: WhisperModelType = WhisperModelType.TINY
+        modelType: WhisperModelType? = null
     ): String = withContext(Dispatchers.IO) {
         val path = audioFile.absolutePath
-        
-        // Если уже расшифровано ранее — отдаем из кэша
         transcriptions[path]?.let { return@withContext it }
 
         loadingStates[path] = true
