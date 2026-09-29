@@ -46,10 +46,10 @@ object VoiceTranscriptionManager {
 
     suspend fun transcribeAudio(
         context: Context,
-        audioFile: File,
+        fileSource: chat.simplex.common.model.CryptoFile,
         modelType: WhisperModelType? = null
     ): String = withContext(Dispatchers.IO) {
-        val path = audioFile.absolutePath
+        val path = fileSource.filePath
         val activeModel = modelType ?: getPreferredModel(context)
 
         transcriptions[path]?.let { return@withContext it }
@@ -57,10 +57,9 @@ object VoiceTranscriptionManager {
         loadingStates[path] = true
         try {
             val t = getTranscriber(context)
-            val result = t.transcribe(audioFile, activeModel)
+            val result = t.transcribe(fileSource, activeModel)
             val text = result.getOrElse { "Error: ${it.message}" }
             
-            // Фиксируем результат, чтобы карточка отобразилась
             transcriptions[path] = text
             text
         } catch (e: Exception) {
@@ -71,4 +70,4 @@ object VoiceTranscriptionManager {
             loadingStates[path] = false
         }
     }
-}
+}   
