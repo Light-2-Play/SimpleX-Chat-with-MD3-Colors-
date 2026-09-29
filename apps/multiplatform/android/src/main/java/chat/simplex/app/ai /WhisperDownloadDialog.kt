@@ -1,6 +1,5 @@
 package chat.simplex.app.ai
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -26,18 +25,20 @@ fun WhisperDownloadDialog(
         if (downloadState !is DownloadState.Progress) onDismiss()
     }) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(24.dp), // Фирменное закругление MD3
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = "Офлайн-распознавание речи",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
@@ -46,7 +47,7 @@ fun WhisperDownloadDialog(
                 when (val state = downloadState) {
                     is DownloadState.Idle -> {
                         Text(
-                            text = "Выберите языковую модель Whisper для загрузки на устройство:",
+                            text = "Выберите модель Whisper для загрузки на устройство:",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -63,7 +64,11 @@ fun WhisperDownloadDialog(
                                 onClick = { selectedType = WhisperModelType.TINY }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Tiny (~135 МБ) — быстро и легко")
+                            Text(
+                                text = "Tiny (~135 МБ) — быстро и легко",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
 
                         Row(
@@ -75,7 +80,11 @@ fun WhisperDownloadDialog(
                                 onClick = { selectedType = WhisperModelType.BASE }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Base (~230 МБ) — выше точность")
+                            Text(
+                                text = "Base (~230 МБ) — выше точность",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
@@ -101,10 +110,10 @@ fun WhisperDownloadDialog(
                     is DownloadState.Progress -> {
                         Text(
                             text = "Загрузка: ${state.currentFile}",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         LinearProgressIndicator(
                             progress = { state.percent / 100f },
                             modifier = Modifier.fillMaxWidth()
@@ -112,14 +121,15 @@ fun WhisperDownloadDialog(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "${state.percent}%",
-                            style = MaterialTheme.typography.labelMedium
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
 
                     is DownloadState.Completed -> {
                         Text(
                             text = "Модель успешно загружена!",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(16.dp))
@@ -134,7 +144,7 @@ fun WhisperDownloadDialog(
                     is DownloadState.Error -> {
                         Text(
                             text = "Ошибка загрузки: ${state.message}",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error
                         )
                         Spacer(modifier = Modifier.height(16.dp))
