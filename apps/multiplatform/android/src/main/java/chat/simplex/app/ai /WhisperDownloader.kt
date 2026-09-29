@@ -1,106 +1,113 @@
 package chat.simplex.app.ai
 
 import android.content.Context
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
-enum class WhisperModelType(val id: String) {
-    TINY("tiny"),
-    BASE("base");
-
-    // Единая папка: /files/models/whisper_tiny или /files/models/whisper_base
-    fun getDir(context: Context): File = File(context.filesDir, "models/whisper_$id")
-
-    fun getTokensFile(context: Context): File = File(getDir(context), "$id-tokens.txt")
-    fun getEncoderFile(context: Context): File = File(getDir(context), "$id-encoder.int8.onnx")
-    fun getDecoderFile(context: Context): File = File(getDir(context), "$id-decoder.int8.onnx")
-
-    fun getDownloadUrl(fileName: String): String =
-        "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-$id/resolve/main/$fileName"
-
-    fun getRequiredFileNames(): List<String> = listOf(
-        "$id-tokens.txt",
-        "$id-encoder.int8.onnx",
-        "$id-decoder.int8.onnx"
-    )
-
-    fun isAvailable(context: Context): Boolean {
-        val tokens = getTokensFile(context)
-        val encoder = getEncoderFile(context)
-        val decoder = getDecoderFile(context)
-        return tokens.exists() && tokens.length() > 0 &&
-               encoder.exists() && encoder.length() > 0 &&
-               decoder.exists() && decoder.length() > 0
-    }
+sealed class DownloadState {
+    object Idle : DownloadState()
+    data class Progress(val percent: Int, val currentFile: String) : DownloadState()
+    object Completed : DownloadState()
+    data class Error(val message: String) : DownloadState()
 }
 
-class WhisperTranscriber(private val context: Context) {
-
-    fun isModelAvailable(modelType: WhisperModelType): Boolean {
-        return modelType.isAvailable(context)
+// Добавьте это свойство перед class WhisperDownloader:
+val WhisperModelType.folderName: String
+    get() = when (this) {
+        WhisperModelType.TINY -> "tiny"
+        WhisperModelType.BASE -> "base"
     }
 
-    suspend fun transcribe(
-        audioFile: File,
-        modelType: WhisperModelType = WhisperModelType.TINY
-    ): Result<String> = withContext(Dispatchers.Default) {
+class WhisperDownloader(private val context: Context) {
+    private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
+    val downloadState = _downloadState.asStateFlow()
+
+    suspend fun downloadModel(modelType: WhisperModelType) = withContext(Dispatchers.IO) {
+        val targetDir = File(context.filesDir, "models/${modelType.folderName}")
+        if (!targetDir.exists()) targetDir.mkdirs()
+
         try {
-            if (!modelType.isAvailable(context)) {
-                val dir = modelType.getDir(context)
-                return@withContext Result.failure(
-                    IllegalStateException("Whisper ${modelType.id} model files not found in ${dir.absolutePath}")
-                )
-            }
-
-            val encoder = modelType.getEncoderFile(context)
-            val decoder = modelType.getDecoderFile(context)
-            val tokens = modelType.getTokensFile(context)
-
-            // Декодирование аудио в 16kHz Mono FloatArray
-            val samples = AudioDecoder.decodeToPcm(audioFile)
-            if (samples.isEmpty()) {
-                return@withContext Result.failure(IllegalStateException("Failed to decode audio file or audio is empty"))
-            }
-
-            val config = OfflineRecognizerConfig(
-                offlineModelConfig = OfflineModelConfig(
-                    whisper = OfflineWhisperModelConfig(
-                        encoder = encoder.absolutePath,
-                        decoder = decoder.absolutePath,
-                        language = "", // автоопределение языка (RU, EN и т.д.)
-                        task = "transcribe",
-                        tailPaddings = 0
-                    ),
-                    modelType = "whisper",
-                    tokens = tokens.absolutePath,
-                    numThreads = 2,
-                    debug = false,
-                    provider = "cpu"
-                )
+            val files = listOf(
+                "${modelType.folderName}-tokens.txt",
+                "${modelType.folderName}-encoder.int8.onnx",
+                "${modelType.folderName}-decoder.int8.onnx"
             )
 
-            val recognizer = OfflineRecognizer(config)
-            val stream = recognizer.createStream()
-            stream.acceptWaveform(samples, 16000)
-            recognizer.decode(stream)
-            val result = recognizer.getResult(stream)
+            files.forEachIndexed { index, fileName ->
+                val destination = File(targetDir, fileName)
+                if (destination.exists() && destination.length() > 0) return@forEachIndexed
 
-            stream.release()
-            recognizer.release()
-
-            val text = result.text.trim()
-            if (text.isEmpty()) {
-                Result.success("[No speech detected]")
-            } else {
-                Result.success(text)
+                val fileUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-${modelType.folderName}/resolve/main/$fileName"
+                downloadFileWithRedirects(fileUrl, destination) { bytesDownloaded, totalBytes ->
+                    val overallProgress = (((index + (bytesDownloaded.toFloat() / totalBytes)) / files.size) * 100).toInt()
+                    _downloadState.value = DownloadState.Progress(overallProgress.coerceIn(0, 100), fileName)
+                }
             }
+
+            _downloadState.value = DownloadState.Completed
         } catch (e: Exception) {
-            Result.failure(e)
+            _downloadState.value = DownloadState.Error(e.localizedMessage ?: "Unknown download error")
         }
+    }
+
+    private fun downloadFileWithRedirects(
+        initialUrl: String,
+        destination: File,
+        onProgress: (Long, Long) -> Unit
+    ) {
+        var currentUrl = URL(initialUrl)
+        var connection: HttpURLConnection
+        var redirects = 0
+
+        while (true) {
+            connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30_000
+                readTimeout = 60_000
+                instanceFollowRedirects = false // Обрабатываем редиректы вручную
+            }
+
+            val status = connection.responseCode
+            if (status in 300..399) {
+                val location = connection.getHeaderField("Location")
+                    ?: throw IllegalStateException("Redirect without Location header")
+                // Разрешаем как абсолютные, так и относительные URL от Hugging Face
+                currentUrl = URL(currentUrl, location)
+                connection.disconnect()
+                redirects++
+                if (redirects > 8) throw IllegalStateException("Too many redirects")
+            } else if (status in 200..299) {
+                break
+            } else {
+                throw IllegalStateException("HTTP server returned code $status")
+            }
+        }
+
+        val totalBytes = connection.contentLengthLong
+        val tempFile = File(destination.parentFile, "${destination.name}.tmp")
+
+        connection.inputStream.use { input ->
+            FileOutputStream(tempFile).use { output ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                var totalRead = 0L
+
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    totalRead += bytesRead
+                    if (totalBytes > 0) {
+                        onProgress(totalRead, totalBytes)
+                    }
+                }
+            }
+        }
+
+        if (destination.exists()) destination.delete()
+        tempFile.renameTo(destination)
     }
 }
