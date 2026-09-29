@@ -9,22 +9,23 @@ import java.nio.ByteOrder
 
 object AudioDecoder {
 
-    /**
-     * Декодирует аудиофайл (.m4a, .ogg Opus, .wav) в сырой поток FloatArray (16 kHz Mono).
-     * Использует FileDescriptor для обхода ограничений доступа MediaExtractor.
-     */
     fun decodeTo16kMonoSamples(audioFile: File): FloatArray {
         if (!audioFile.exists() || audioFile.length() == 0L) {
             return FloatArray(0)
         }
 
         val extractor = MediaExtractor()
-        val fis = FileInputStream(audioFile)
+        var fis: FileInputStream? = null
         var codec: MediaCodec? = null
 
         try {
-            // Передаем FileDescriptor с явным смещением и длиной файла
-            extractor.setDataSource(fis.fd, 0L, audioFile.length())
+            // Безопасное подключение источника данных
+            try {
+                fis = FileInputStream(audioFile)
+                extractor.setDataSource(fis.fd, 0L, audioFile.length())
+            } catch (_: Exception) {
+                extractor.setDataSource(audioFile.absolutePath)
+            }
 
             var audioTrackIndex = -1
             var inputFormat: MediaFormat? = null
@@ -45,10 +46,10 @@ object AudioDecoder {
 
             extractor.selectTrack(audioTrackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME)!!
-            val sampleRate = if (inputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+            var sampleRate = if (inputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
                 inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             } else 48000
-            val channelCount = if (inputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+            var channelCount = if (inputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                 inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             } else 1
 
@@ -58,10 +59,13 @@ object AudioDecoder {
 
             val pcmData = ArrayList<Short>()
             val bufferInfo = MediaCodec.BufferInfo()
-            var isEOS = false
+            var sawInputEOS = false
+            var sawOutputEOS = false
+            var noOutputCounter = 0
 
-            while (true) {
-                if (!isEOS) {
+            // Цикл декодирования с ожиданием опустошения выходного буфера
+            while (!sawOutputEOS && noOutputCounter < 60) {
+                if (!sawInputEOS) {
                     val inIndex = codec.dequeueInputBuffer(10_000)
                     if (inIndex >= 0) {
                         val inputBuffer = codec.getInputBuffer(inIndex)
@@ -69,7 +73,7 @@ object AudioDecoder {
                             val sampleSize = extractor.readSampleData(inputBuffer, 0)
                             if (sampleSize < 0) {
                                 codec.queueInputBuffer(inIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                                isEOS = true
+                                sawInputEOS = true
                             } else {
                                 codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
                                 extractor.advance()
@@ -80,6 +84,7 @@ object AudioDecoder {
 
                 val outIndex = codec.dequeueOutputBuffer(bufferInfo, 10_000)
                 if (outIndex >= 0) {
+                    noOutputCounter = 0
                     val outputBuffer = codec.getOutputBuffer(outIndex)
                     if (outputBuffer != null && bufferInfo.size > 0) {
                         outputBuffer.position(bufferInfo.offset)
@@ -91,16 +96,27 @@ object AudioDecoder {
                     }
                     codec.releaseOutputBuffer(outIndex, false)
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        sawOutputEOS = true
                         break
                     }
-                } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER && isEOS) {
-                    break
+                } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val newFormat = codec.outputFormat
+                    if (newFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                        sampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    }
+                    if (newFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                        channelCount = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    }
+                } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (sawInputEOS) {
+                        noOutputCounter++
+                    }
                 }
             }
 
             if (pcmData.isEmpty()) return FloatArray(0)
 
-            // Конвертация многоканального звука в моно
+            // Сведение в моно
             val monoShorts = if (channelCount > 1) {
                 val mono = ShortArray(pcmData.size / channelCount)
                 for (i in mono.indices) {
@@ -115,14 +131,14 @@ object AudioDecoder {
                 pcmData.toShortArray()
             }
 
-            // Ресемплинг в 16000 Гц и перевод в диапазон [-1.0f, 1.0f]
+            // Приведение к 16000 Гц FloatArray [-1.0f .. 1.0f]
             return resampleTo16k(monoShorts, sampleRate)
 
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
-            try { fis.close() } catch (_: Exception) {}
+            try { fis?.close() } catch (_: Exception) {}
         }
     }
 
