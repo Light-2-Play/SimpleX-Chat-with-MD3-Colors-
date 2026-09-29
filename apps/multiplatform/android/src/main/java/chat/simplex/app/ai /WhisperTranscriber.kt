@@ -63,12 +63,13 @@ class WhisperTranscriber(private val context: Context) {
 
             // 1. Декодирование аудио
             // Если в AudioDecoder функция называется decode(), вызовите AudioDecoder.decode(audioFile)
-            val samples = AudioDecoder.decodeToPcm(audioFile)
+            // 1. Вызываем функцию с ее настоящим именем decodeTo16kMonoSamples
+            val samples = AudioDecoder.decodeTo16kMonoSamples(audioFile)
             if (samples.isEmpty()) {
                 return@withContext Result.failure(IllegalStateException("Failed to decode audio file or audio is empty"))
             }
 
-            // 2. Конфигурация модели Whisper
+            // 2. Конфигурация модели
             val modelConfig = OfflineModelConfig(
                 whisper = OfflineWhisperModelConfig(
                     encoder = encoder.absolutePath,
@@ -84,12 +85,12 @@ class WhisperTranscriber(private val context: Context) {
                 provider = "cpu"
             )
 
-            // Параметр называется modelConfig (НЕ offlineModelConfig)
+            // 3. Параметр называется modelConfig (не offlineModelConfig)
             val config = OfflineRecognizerConfig(
                 modelConfig = modelConfig
             )
 
-            // Первым аргументом передаём null вместо AssetManager
+            // 4. Первым аргументом передаем null (AssetManager не нужен, файлы читаются из filesDir)
             val recognizer = OfflineRecognizer(null, config)
             val stream = recognizer.createStream()
             stream.acceptWaveform(samples, 16000)
