@@ -48,6 +48,7 @@ import chat.simplex.app.ai.VoiceTranscriptionBox
 import chat.simplex.common.platform.getLoadedFilePath
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.padding
+import chat.simplex.common.platform.getLoadedFileSource
 
 // Глобальное состояние для управления диалогом SingBox из Compose
 var showSingBoxDialogState = mutableStateOf(false)
@@ -143,15 +144,15 @@ class MainActivity: FragmentActivity() {
 
     enableEdgeToEdge()
 
-    setContent {
+   setContent {
     CompositionLocalProvider(
         LocalVoiceTranscriptionWidget provides { cItem ->
             val fileMeta = cItem.file
-            val absolutePath = if (fileMeta != null) getLoadedFilePath(fileMeta) else null
+            val fileSource = if (fileMeta != null) getLoadedFileSource(fileMeta) else null
             
-            if (absolutePath != null) {
+            if (fileSource != null) {
                 chat.simplex.app.ai.VoiceTranscriptionBox(
-                    audioFile = java.io.File(absolutePath),
+                    fileSource = fileSource,
                     isSent = cItem.chatDir.sent,
                     modifier = androidx.compose.ui.Modifier.padding(
                         start = if (cItem.chatDir.sent) 8.dp else 12.dp,
