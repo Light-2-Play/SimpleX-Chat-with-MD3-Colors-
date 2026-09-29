@@ -26,8 +26,7 @@ import java.io.File
 fun VoiceTranscriptionBox(
     audioFile: File?,
     isSent: Boolean = false,
-    modifier: Modifier = Modifier,
-    preferredModel: WhisperModelType = WhisperModelType.TINY
+    modifier: Modifier = Modifier
 ) {
     if (audioFile == null || !audioFile.exists()) return
 
@@ -47,18 +46,18 @@ fun VoiceTranscriptionBox(
     if (showDownloadDialog) {
         WhisperDownloadDialog(
             downloader = downloader,
-            initialModelType = preferredModel,
+            initialModelType = VoiceTranscriptionManager.getPreferredModel(context),
             onDismiss = { showDownloadDialog = false },
-            onModelReady = { downloadedModel ->
+            onModelReady = { model ->
                 showDownloadDialog = false
+                VoiceTranscriptionManager.setPreferredModel(context, model)
                 scope.launch {
-                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, downloadedModel)
+                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, model)
                 }
             }
         )
     }
 
-    // Без fillMaxWidth(), чтобы баббл голосового не распирало на весь экран
     Column(
         modifier = modifier.wrapContentSize(),
         horizontalAlignment = if (isSent) Alignment.End else Alignment.Start
@@ -88,20 +87,27 @@ fun VoiceTranscriptionBox(
                     }
                 } else {
                     Surface(
-                        onClick = {
-                            val activeModel = transcriber.getInstalledModel()
-                            if (activeModel == null) {
-                                showDownloadDialog = true
-                            } else {
-                                scope.launch {
-                                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, activeModel)
-                                }
-                            }
-                        },
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
                         tonalElevation = 1.dp,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    val currentModel = VoiceTranscriptionManager.getPreferredModel(context)
+                                    if (!transcriber.isModelAvailable(currentModel)) {
+                                        showDownloadDialog = true
+                                    } else {
+                                        scope.launch {
+                                            VoiceTranscriptionManager.transcribeAudio(context, audioFile, currentModel)
+                                        }
+                                    }
+                                },
+                                onLongClick = {
+                                    // Долгое нажатие открывает диалог выбора / переключения между Tiny и Base
+                                    showDownloadDialog = true
+                                }
+                            )
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
