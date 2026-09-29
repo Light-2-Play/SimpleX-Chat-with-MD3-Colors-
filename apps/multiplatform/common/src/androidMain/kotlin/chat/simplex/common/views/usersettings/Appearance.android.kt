@@ -158,11 +158,14 @@ fun AppearanceScope.AppearanceLayout(
   }
 }
 
-private fun findEnabledIcon(): AppIcon = AppIcon.values().firstOrNull { icon ->
-  androidAppContext.packageManager.getComponentEnabledSetting(
-    ComponentName(APPLICATION_ID, "chat.simplex.app.MainActivity_${icon.name.lowercase()}")
-  ).let { it == COMPONENT_ENABLED_STATE_DEFAULT || it == COMPONENT_ENABLED_STATE_ENABLED }
-} ?: AppIcon.DEFAULT
+private fun findEnabledIcon(): AppIcon {
+  val pm = androidAppContext.packageManager
+  return AppIcon.values().firstOrNull { icon ->
+    // Заменяем "chat.simplex.app." на $APPLICATION_ID.
+    val component = ComponentName(APPLICATION_ID, "$APPLICATION_ID.MainActivity_${icon.name.lowercase()}")
+    pm.getComponentEnabledSetting(component) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+  } ?: AppIcon.DEFAULT
+}
 
 @Preview
 @Composable
