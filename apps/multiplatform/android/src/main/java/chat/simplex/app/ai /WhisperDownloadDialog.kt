@@ -25,7 +25,7 @@ fun WhisperDownloadDialog(
         if (downloadState !is DownloadState.Progress) onDismiss()
     }) {
         Surface(
-            shape = RoundedCornerShape(24.dp), // Фирменное закругление MD3
+            shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             modifier = Modifier
@@ -37,7 +37,7 @@ fun WhisperDownloadDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Офлайн-распознавание речи",
+                    text = "Offline Speech Recognition",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -47,14 +47,13 @@ fun WhisperDownloadDialog(
                 when (val state = downloadState) {
                     is DownloadState.Idle -> {
                         Text(
-                            text = "Выберите модель Whisper для загрузки на устройство:",
+                            text = "Select a Whisper model to download to your device:",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Выбор модели Tiny / Base
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -65,7 +64,7 @@ fun WhisperDownloadDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Tiny (~135 МБ) — быстро и легко",
+                                text = "Tiny (~135 MB) — fast & lightweight",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -81,7 +80,7 @@ fun WhisperDownloadDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Base (~230 МБ) — выше точность",
+                                text = "Base (~230 MB) — higher accuracy",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -94,7 +93,7 @@ fun WhisperDownloadDialog(
                             horizontalArrangement = Arrangement.End
                         ) {
                             TextButton(onClick = onDismiss) {
-                                Text("Отмена")
+                                Text("Cancel")
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(onClick = {
@@ -102,14 +101,14 @@ fun WhisperDownloadDialog(
                                     downloader.downloadModel(selectedType)
                                 }
                             }) {
-                                Text("Скачать")
+                                Text("Download")
                             }
                         }
                     }
 
                     is DownloadState.Progress -> {
                         Text(
-                            text = "Загрузка: ${state.currentFile}",
+                            text = "Downloading: ${state.currentFile}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -128,7 +127,7 @@ fun WhisperDownloadDialog(
 
                     is DownloadState.Completed -> {
                         Text(
-                            text = "Модель успешно загружена!",
+                            text = "Model downloaded successfully!",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -137,13 +136,13 @@ fun WhisperDownloadDialog(
                             onModelReady()
                             onDismiss()
                         }) {
-                            Text("Готово")
+                            Text("Done")
                         }
                     }
 
                     is DownloadState.Error -> {
                         Text(
-                            text = "Ошибка загрузки: ${state.message}",
+                            text = "Download error: ${state.message}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -151,7 +150,7 @@ fun WhisperDownloadDialog(
                         Button(onClick = {
                             scope.launch { downloader.downloadModel(selectedType) }
                         }) {
-                            Text("Повторить")
+                            Text("Retry")
                         }
                     }
                 }
