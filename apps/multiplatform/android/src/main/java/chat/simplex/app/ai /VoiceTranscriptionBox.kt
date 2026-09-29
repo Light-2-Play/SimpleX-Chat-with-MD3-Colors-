@@ -49,10 +49,10 @@ fun VoiceTranscriptionBox(
             downloader = downloader,
             initialModelType = preferredModel,
             onDismiss = { showDownloadDialog = false },
-            onModelReady = {
+            onModelReady = { downloadedModel ->
                 showDownloadDialog = false
                 scope.launch {
-                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, preferredModel)
+                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, downloadedModel)
                 }
             }
         )
@@ -89,11 +89,12 @@ fun VoiceTranscriptionBox(
                 } else {
                     Surface(
                         onClick = {
-                            if (!transcriber.isModelAvailable(preferredModel)) {
+                            val activeModel = transcriber.getInstalledModel()
+                            if (activeModel == null) {
                                 showDownloadDialog = true
                             } else {
                                 scope.launch {
-                                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, preferredModel)
+                                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, activeModel)
                                 }
                             }
                         },
