@@ -1,0 +1,155 @@
+package chat.simplex.app.ai
+
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import java.io.File
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun VoiceTranscriptionBox(
+    audioFile: File?,
+    modifier: Modifier = Modifier,
+    preferredModel: WhisperModelType = WhisperModelType.TINY
+) {
+    if (audioFile == null || !audioFile.exists()) return
+
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+
+    val transcriber = remember { VoiceTranscriptionManager.getTranscriber(context) }
+    val downloader = remember { VoiceTranscriptionManager.getDownloader(context) }
+
+    val filePath = audioFile.absolutePath
+    val transcribedText = VoiceTranscriptionManager.transcriptions[filePath]
+    val isLoading = VoiceTranscriptionManager.loadingStates[filePath] ?: false
+
+    var showDownloadDialog by remember { mutableStateOf(false) }
+
+    // Если модель еще не скачана — показываем наш диалог загрузки
+    if (showDownloadDialog) {
+        WhisperDownloadDialog(
+            downloader = downloader,
+            initialModelType = preferredModel,
+            onDismiss = { showDownloadDialog = false },
+            onModelReady = {
+                showDownloadDialog = false
+                scope.launch {
+                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, preferredModel)
+                }
+            }
+        )
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Кнопка транскрипции (показывается, если текст еще не расшифрован)
+        if (transcribedText == null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isLoading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 4.dp, top = 2.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Распознавание...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Surface(
+                        onClick = {
+                            if (!transcriber.isModelAvailable(preferredModel)) {
+                                showDownloadDialog = true
+                            } else {
+                                scope.launch {
+                                    VoiceTranscriptionManager.transcribeAudio(context, audioFile, preferredModel)
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        tonalElevation = 1.dp
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "A→",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Текст",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Карточка с готовым текстом (появляется с плавной анимацией)
+        AnimatedVisibility(
+            visible = transcribedText != null,
+            enter = fadeIn() + expandVertically()
+        ) {
+            transcribedText?.let { text ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                clipboardManager.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Текст скопирован", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
