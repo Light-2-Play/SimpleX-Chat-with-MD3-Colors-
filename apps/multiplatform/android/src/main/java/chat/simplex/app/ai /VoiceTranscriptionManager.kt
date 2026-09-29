@@ -38,7 +38,7 @@ object VoiceTranscriptionManager {
         try {
             val t = getTranscriber(context)
             val result = t.transcribe(audioFile, modelType)
-            val text = result.getOrElse { "Не удалось распознать речь: ${it.message}" }
+            val text = result.getOrElse { "Failed to transcribe speech: ${it.message}" }
             transcriptions[path] = text
             text
         } finally {
