@@ -23,6 +23,50 @@ import chat.simplex.common.model.CryptoFile
 import kotlinx.coroutines.launch
 
 @Composable
+fun TranscribingWaveAnimation(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "transcription_wave")
+
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 4f, targetValue = 14f,
+        animationSpec = infiniteRepeatable(tween(420, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "h1"
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 13f, targetValue = 5f,
+        animationSpec = infiniteRepeatable(tween(320, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "h2"
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 6f, targetValue = 15f,
+        animationSpec = infiniteRepeatable(tween(480, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "h3"
+    )
+    val h4 by infiniteTransition.animateFloat(
+        initialValue = 11f, targetValue = 4f,
+        animationSpec = infiniteRepeatable(tween(360, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "h4"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+        modifier = modifier.height(16.dp)
+    ) {
+        listOf(h1, h2, h3, h4).forEach { heightValue ->
+            Box(
+                modifier = Modifier
+                    .width(2.5.dp)
+                    .height(heightValue.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(1.5.dp)
+                    )
+            )
+        }
+    }
+}
+
+@Composable
 fun VoiceTranscriptionBox(
     fileSource: CryptoFile?,
     isSent: Boolean = false,
