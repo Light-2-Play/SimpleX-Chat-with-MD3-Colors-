@@ -152,59 +152,52 @@ fun VoiceTranscriptionBox(
                     }
                 } else {
                     Surface(
-                        onClick = {
-                            currentModel = VoiceTranscriptionManager.getPreferredModel(context)
-                            if (!transcriber.isModelAvailable(currentModel)) {
-                                showDownloadDialog = true
-                            } else {
-                                scope.launch {
-                                    VoiceTranscriptionManager.transcribeAudio(context, fileSource, currentModel)
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = btnContainerColor,
-                        tonalElevation = 2.dp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "A →",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = btnContentColor
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Text",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = btnContentColor
-                            )
-
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(10.dp)
-                                    .background(btnContentColor.copy(alpha = 0.35f))
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-
-                            Text(
-                                text = "${currentModel.id.uppercase()} ▾",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = monet.primary,
-                                modifier = Modifier.clickable {
+                            onClick = {
+                                currentModel = VoiceTranscriptionManager.getPreferredModel(context)
+                                if (!transcriber.isModelAvailable(currentModel)) {
                                     showDownloadDialog = true
+                                } else {
+                                    scope.launch {
+                                        VoiceTranscriptionManager.transcribeAudio(context, fileSource, currentModel)
+                                    }
                                 }
-                            )
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = btnContainerColor,
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Voice to Text",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = btnContentColor
+                                )
+
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(1.dp)
+                                        .height(10.dp)
+                                        .background(btnContentColor.copy(alpha = 0.35f))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                Text(
+                                    text = "${currentModel.id.uppercase()} ▾",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = monet.primary,
+                                    modifier = Modifier.clickable {
+                                        showDownloadDialog = true
+                                    }
+                                )
+                            }
                         }
-                    }
                 }
             }
         }
