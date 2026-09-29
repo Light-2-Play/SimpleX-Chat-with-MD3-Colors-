@@ -178,8 +178,10 @@ val downloadSherpaAar by tasks.registering {
         if (!sherpaAarFile.exists()) {
             sherpaAarFile.parentFile.mkdirs()
             println("--> Скачивание sherpa-onnx-1.13.8.aar из GitHub Releases...")
-            val url = java.net.URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar")
-            val connection = url.openConnection() as java.net.HttpURLConnection
+            
+            // Используем URI вместо прямых вызовов java.net.URL в Gradle DSL
+            val downloadUrl = java.net.URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar").toURL()
+            val connection = downloadUrl.openConnection() as java.net.HttpURLConnection
             connection.instanceFollowRedirects = true
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
