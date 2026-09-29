@@ -43,6 +43,11 @@ import chat.simplex.res.MR
 import java.lang.ref.WeakReference
 import chat.simplex.app.SingBoxService
 import chat.simplex.common.views.chatlist.ByeDpiBridge
+import chat.simplex.common.views.chat.item.LocalVoiceTranscriptionWidget
+import chat.simplex.app.ai.VoiceTranscriptionBox
+import chat.simplex.common.platform.getLoadedFilePath
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.padding
 
 // Глобальное состояние для управления диалогом SingBox из Compose
 var showSingBoxDialogState = mutableStateOf(false)
@@ -139,9 +144,24 @@ class MainActivity: FragmentActivity() {
     enableEdgeToEdge()
 
     setContent {
-      SingBoxComposeDialogs(this@MainActivity)
-      AppScreen()
+    CompositionLocalProvider(
+        LocalVoiceTranscriptionWidget provides { cItem ->
+            // Достаем физический путь к аудиофайлу из кэша SimpleX
+            val fileMeta = cItem.file
+            val absolutePath = if (fileMeta != null) getLoadedFilePath(fileMeta) else null
+            
+            if (absolutePath != null) {
+                chat.simplex.app.ai.VoiceTranscriptionBox(
+                    audioFile = java.io.File(absolutePath),
+                    modifier = androidx.compose.ui.Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                )
+            }
+        }
+    ) {
+        SingBoxComposeDialogs(this@MainActivity)
+        AppScreen()
     }
+}
 
     SimplexApp.context.schedulePeriodicServiceRestartWorker()
     SimplexApp.context.schedulePeriodicWakeUp()
