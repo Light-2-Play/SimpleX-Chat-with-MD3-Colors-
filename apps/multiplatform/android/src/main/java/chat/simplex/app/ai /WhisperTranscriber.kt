@@ -61,30 +61,36 @@ class WhisperTranscriber(private val context: Context) {
             val decoder = modelType.getDecoderFile(context)
             val tokens = modelType.getTokensFile(context)
 
-            // Декодирование аудио в 16kHz Mono FloatArray
+            // 1. Декодирование аудио
+            // Если в AudioDecoder функция называется decode(), вызовите AudioDecoder.decode(audioFile)
             val samples = AudioDecoder.decodeToPcm(audioFile)
             if (samples.isEmpty()) {
                 return@withContext Result.failure(IllegalStateException("Failed to decode audio file or audio is empty"))
             }
 
-            val config = OfflineRecognizerConfig(
-                offlineModelConfig = OfflineModelConfig(
-                    whisper = OfflineWhisperModelConfig(
-                        encoder = encoder.absolutePath,
-                        decoder = decoder.absolutePath,
-                        language = "", // автоопределение языка (RU, EN и т.д.)
-                        task = "transcribe",
-                        tailPaddings = 0
-                    ),
-                    modelType = "whisper",
-                    tokens = tokens.absolutePath,
-                    numThreads = 2,
-                    debug = false,
-                    provider = "cpu"
-                )
+            // 2. Конфигурация модели Whisper
+            val modelConfig = OfflineModelConfig(
+                whisper = OfflineWhisperModelConfig(
+                    encoder = encoder.absolutePath,
+                    decoder = decoder.absolutePath,
+                    language = "", // автоопределение языка
+                    task = "transcribe",
+                    tailPaddings = 0
+                ),
+                modelType = "whisper",
+                tokens = tokens.absolutePath,
+                numThreads = 2,
+                debug = false,
+                provider = "cpu"
             )
 
-            val recognizer = OfflineRecognizer(config)
+            // Параметр называется modelConfig (НЕ offlineModelConfig)
+            val config = OfflineRecognizerConfig(
+                modelConfig = modelConfig
+            )
+
+            // Первым аргументом передаём null вместо AssetManager
+            val recognizer = OfflineRecognizer(null, config)
             val stream = recognizer.createStream()
             stream.acceptWaveform(samples, 16000)
             recognizer.decode(stream)
