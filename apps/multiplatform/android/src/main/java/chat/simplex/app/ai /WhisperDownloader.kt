@@ -17,6 +17,13 @@ sealed class DownloadState {
     data class Error(val message: String) : DownloadState()
 }
 
+// Добавьте это свойство перед class WhisperDownloader:
+val WhisperModelType.folderName: String
+    get() = when (this) {
+        WhisperModelType.TINY -> "tiny"
+        WhisperModelType.BASE -> "base"
+    }
+
 class WhisperDownloader(private val context: Context) {
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState = _downloadState.asStateFlow()
