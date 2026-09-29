@@ -67,12 +67,8 @@
             android:windowSoftInputMode="adjustResize"
             android:configChanges="uiMode"
             android:theme="@style/Theme.SimpleX">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
+            <!-- Блок с MAIN и LAUNCHER удален, теперь запуск идет строго через aliases -->
+        </activity>
             <!-- open simplex:/ connection URI -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
