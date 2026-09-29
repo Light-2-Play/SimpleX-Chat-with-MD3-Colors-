@@ -52,20 +52,21 @@ object VoiceTranscriptionManager {
         val path = audioFile.absolutePath
         val activeModel = modelType ?: getPreferredModel(context)
 
-        // Если уже расшифровано успешно, возвращаем из кэша
         transcriptions[path]?.let { return@withContext it }
 
         loadingStates[path] = true
         try {
             val t = getTranscriber(context)
             val result = t.transcribe(audioFile, activeModel)
-            val text = result.getOrElse { "Failed to transcribe speech: ${it.message}" }
+            val text = result.getOrElse { "Error: ${it.message}" }
             
-            // Кэшируем только успешный результат, чтобы ошибки не блокировали повторные попытки
-            if (result.isSuccess) {
-                transcriptions[path] = text
-            }
+            // Фиксируем результат, чтобы карточка отобразилась
+            transcriptions[path] = text
             text
+        } catch (e: Exception) {
+            val errorText = "Error: ${e.localizedMessage ?: "Unknown error"}"
+            transcriptions[path] = errorText
+            errorText
         } finally {
             loadingStates[path] = false
         }
