@@ -53,11 +53,10 @@ class WhisperTranscriber(private val context: Context) {
     }
 
     suspend fun transcribe(
-        audioFile: File,
+        fileSource: chat.simplex.common.model.CryptoFile,
         modelType: WhisperModelType? = null
     ): Result<String> = withContext(Dispatchers.Default) {
         try {
-            // Если модель не передана явно, берем ту, которая фактически есть на накопителе
             val targetModel = modelType ?: getInstalledModel()
                 ?: return@withContext Result.failure(
                     IllegalStateException("No Whisper model found. Please download Tiny or Base first.")
@@ -67,7 +66,8 @@ class WhisperTranscriber(private val context: Context) {
             val decoder = targetModel.getDecoderFile(context)
             val tokens = targetModel.getTokensFile(context)
 
-            val samples = AudioDecoder.decodeTo16kMonoSamples(audioFile)
+            // Передаем fileSource в обновленный AudioDecoder
+            val samples = AudioDecoder.decodeTo16kMonoSamples(fileSource)
             if (samples.isEmpty()) {
                 return@withContext Result.failure(IllegalStateException("Failed to decode audio file or audio is empty"))
             }
