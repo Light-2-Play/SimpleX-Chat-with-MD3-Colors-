@@ -3,28 +3,31 @@ package chat.simplex.app.ai
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import chat.simplex.common.model.CryptoFile
+import chat.simplex.common.platform.CryptoMediaSource
+import chat.simplex.common.platform.getAppFilePath
+import chat.simplex.common.platform.readCryptoFile
 import java.io.File
-import java.io.FileInputStream
 import java.nio.ByteOrder
 
 object AudioDecoder {
 
-    fun decodeTo16kMonoSamples(audioFile: File): FloatArray {
-        if (!audioFile.exists() || audioFile.length() == 0L) {
+    fun decodeTo16kMonoSamples(fileSource: CryptoFile): FloatArray {
+        val absoluteFilePath = if (fileSource.isAbsolutePath) fileSource.filePath else getAppFilePath(fileSource.filePath)
+        val file = File(absoluteFilePath)
+        if (!file.exists() || file.length() == 0L) {
             return FloatArray(0)
         }
 
         val extractor = MediaExtractor()
-        var fis: FileInputStream? = null
         var codec: MediaCodec? = null
 
         try {
-            // Безопасное подключение источника данных
-            try {
-                fis = FileInputStream(audioFile)
-                extractor.setDataSource(fis.fd, 0L, audioFile.length())
-            } catch (_: Exception) {
-                extractor.setDataSource(audioFile.absolutePath)
+            // Подключаем расшифрованный источник данных
+            if (fileSource.cryptoArgs != null) {
+                extractor.setDataSource(CryptoMediaSource(readCryptoFile(absoluteFilePath, fileSource.cryptoArgs)))
+            } else {
+                extractor.setDataSource(absoluteFilePath)
             }
 
             var audioTrackIndex = -1
@@ -63,7 +66,6 @@ object AudioDecoder {
             var sawOutputEOS = false
             var noOutputCounter = 0
 
-            // Цикл декодирования с ожиданием опустошения выходного буфера
             while (!sawOutputEOS && noOutputCounter < 60) {
                 if (!sawInputEOS) {
                     val inIndex = codec.dequeueInputBuffer(10_000)
@@ -108,15 +110,12 @@ object AudioDecoder {
                         channelCount = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     }
                 } else if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    if (sawInputEOS) {
-                        noOutputCounter++
-                    }
+                    if (sawInputEOS) noOutputCounter++
                 }
             }
 
             if (pcmData.isEmpty()) return FloatArray(0)
 
-            // Сведение в моно
             val monoShorts = if (channelCount > 1) {
                 val mono = ShortArray(pcmData.size / channelCount)
                 for (i in mono.indices) {
@@ -131,14 +130,12 @@ object AudioDecoder {
                 pcmData.toShortArray()
             }
 
-            // Приведение к 16000 Гц FloatArray [-1.0f .. 1.0f]
             return resampleTo16k(monoShorts, sampleRate)
 
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
-            try { fis?.close() } catch (_: Exception) {}
         }
     }
 
