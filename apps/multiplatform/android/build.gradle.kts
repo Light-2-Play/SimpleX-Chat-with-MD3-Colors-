@@ -203,6 +203,12 @@ dependencies {
 
     // Модуль OEM-расширений (ночной режим, HDR, боке)
     implementation("androidx.camera:camera-extensions:$cameraxVersion")
+
+// Движок автономного распознавания речи (Next-gen Kaldi / ONNX)
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.10.41")
+    
+    // Корутины для фоновой обработки
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
 tasks {
     val compressApk by creating {
