@@ -57,7 +57,7 @@ class WhisperTranscriber(private val context: Context) {
                         tailPaddings = 1000
                     ),
                     numThreads = 4,
-                    debug = 0,
+                   debug = false,
                     provider = "cpu"
                 )
             )
