@@ -1,7 +1,7 @@
+@file:Suppress("UnstableApiUsage")
+
 import java.net.URI
 import java.net.HttpURLConnection
-
-@file:Suppress("UnstableApiUsage")
 
 plugins {
     id("com.android.application")
