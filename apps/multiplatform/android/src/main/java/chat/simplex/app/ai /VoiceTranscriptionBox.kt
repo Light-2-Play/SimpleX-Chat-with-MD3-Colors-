@@ -25,6 +25,7 @@ import java.io.File
 @Composable
 fun VoiceTranscriptionBox(
     audioFile: File?,
+    isSent: Boolean = false,
     modifier: Modifier = Modifier,
     preferredModel: WhisperModelType = WhisperModelType.TINY
 ) {
@@ -57,12 +58,15 @@ fun VoiceTranscriptionBox(
         )
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    // Без fillMaxWidth(), чтобы баббл голосового не распирало на весь экран
+    Column(
+        modifier = modifier.wrapContentSize(),
+        horizontalAlignment = if (isSent) Alignment.End else Alignment.Start
+    ) {
         if (transcribedText == null) {
-            // Выравниваем строго по левому краю (Arrangement.Start) прямо под таймером
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
+                modifier = Modifier.wrapContentSize(),
+                horizontalArrangement = if (isSent) Arrangement.End else Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (isLoading) {
@@ -71,7 +75,7 @@ fun VoiceTranscriptionBox(
                         modifier = Modifier.padding(top = 4.dp)
                     ) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(13.dp),
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -105,7 +109,7 @@ fun VoiceTranscriptionBox(
                             Text(
                                 text = "A →",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -129,8 +133,8 @@ fun VoiceTranscriptionBox(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                     modifier = Modifier
-                        .fillMaxWidth()
                         .padding(top = 6.dp)
+                        .wrapContentSize()
                         .combinedClickable(
                             onClick = {},
                             onLongClick = {
