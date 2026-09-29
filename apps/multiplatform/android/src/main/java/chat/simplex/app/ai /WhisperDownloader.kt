@@ -17,40 +17,33 @@ sealed class DownloadState {
     data class Error(val message: String) : DownloadState()
 }
 
-// Добавьте это свойство перед class WhisperDownloader:
-val WhisperModelType.folderName: String
-    get() = when (this) {
-        WhisperModelType.TINY -> "tiny"
-        WhisperModelType.BASE -> "base"
-    }
-
 class WhisperDownloader(private val context: Context) {
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState = _downloadState.asStateFlow()
 
     suspend fun downloadModel(modelType: WhisperModelType) = withContext(Dispatchers.IO) {
-        val targetDir = File(context.filesDir, "models/${modelType.folderName}")
+        val targetDir = modelType.getDir(context)
         if (!targetDir.exists()) targetDir.mkdirs()
 
         try {
-            val files = listOf(
-                "${modelType.folderName}-tokens.txt",
-                "${modelType.folderName}-encoder.int8.onnx",
-                "${modelType.folderName}-decoder.int8.onnx"
-            )
+            val fileNames = modelType.getRequiredFileNames()
 
-            files.forEachIndexed { index, fileName ->
+            fileNames.forEachIndexed { index, fileName ->
                 val destination = File(targetDir, fileName)
                 if (destination.exists() && destination.length() > 0) return@forEachIndexed
 
-                val fileUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-${modelType.folderName}/resolve/main/$fileName"
+                val fileUrl = modelType.getDownloadUrl(fileName)
                 downloadFileWithRedirects(fileUrl, destination) { bytesDownloaded, totalBytes ->
-                    val overallProgress = (((index + (bytesDownloaded.toFloat() / totalBytes)) / files.size) * 100).toInt()
+                    val overallProgress = (((index + (bytesDownloaded.toFloat() / totalBytes)) / fileNames.size) * 100).toInt()
                     _downloadState.value = DownloadState.Progress(overallProgress.coerceIn(0, 100), fileName)
                 }
             }
 
-            _downloadState.value = DownloadState.Completed
+            if (modelType.isAvailable(context)) {
+                _downloadState.value = DownloadState.Completed
+            } else {
+                _downloadState.value = DownloadState.Error("Downloaded files are missing or corrupted")
+            }
         } catch (e: Exception) {
             _downloadState.value = DownloadState.Error(e.localizedMessage ?: "Unknown download error")
         }
@@ -69,14 +62,13 @@ class WhisperDownloader(private val context: Context) {
             connection = (currentUrl.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
                 readTimeout = 60_000
-                instanceFollowRedirects = false // Обрабатываем редиректы вручную
+                instanceFollowRedirects = false
             }
 
             val status = connection.responseCode
             if (status in 300..399) {
                 val location = connection.getHeaderField("Location")
                     ?: throw IllegalStateException("Redirect without Location header")
-                // Разрешаем как абсолютные, так и относительные URL от Hugging Face
                 currentUrl = URL(currentUrl, location)
                 connection.disconnect()
                 redirects++
