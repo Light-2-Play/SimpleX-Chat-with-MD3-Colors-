@@ -8,6 +8,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Добавьте этот блок сюда:
+repositories {
+    google()
+    mavenCentral()
+    maven { url = uri("https://jitpack.io") }
+}
+
 android {
     compileSdk = 35
 
