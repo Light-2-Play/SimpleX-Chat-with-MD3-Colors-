@@ -6,7 +6,7 @@ import android.media.MediaFormat
 import chat.simplex.common.model.CryptoFile
 import chat.simplex.common.platform.CryptoMediaSource
 import chat.simplex.common.platform.getAppFilePath
-import chat.simplex.common.platform.readCryptoFile
+import chat.simplex.common.model.readCryptoFile
 import java.io.File
 import java.nio.ByteOrder
 
