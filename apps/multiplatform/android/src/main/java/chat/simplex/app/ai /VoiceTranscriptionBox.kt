@@ -5,8 +5,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -66,6 +68,7 @@ fun TranscribingWaveAnimation(modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VoiceTranscriptionBox(
     fileSource: CryptoFile?,
@@ -104,6 +107,10 @@ fun VoiceTranscriptionBox(
         )
     }
 
+    // Динамические цвета для MD3 в зависимости от того, наше это сообщение или собеседника
+    val btnContainerColor = if (isSent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+    val btnContentColor = if (isSent) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+
     Column(
         modifier = modifier.wrapContentSize(),
         horizontalAlignment = if (isSent) Alignment.End else Alignment.Start
@@ -117,7 +124,7 @@ fun VoiceTranscriptionBox(
                 if (isLoading) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        color = btnContainerColor.copy(alpha = 0.7f),
                         tonalElevation = 2.dp,
                         modifier = Modifier.padding(top = 4.dp)
                     ) {
@@ -131,7 +138,7 @@ fun VoiceTranscriptionBox(
                                 text = "Transcribing...",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = btnContentColor
                             )
                         }
                     }
@@ -148,26 +155,26 @@ fun VoiceTranscriptionBox(
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                        color = btnContainerColor.copy(alpha = 0.7f),
                         tonalElevation = 1.dp,
                         modifier = Modifier.padding(top = 4.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "A →",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = btnContentColor
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = "Text",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                color = btnContentColor
                             )
 
                             Spacer(modifier = Modifier.width(5.dp))
@@ -175,7 +182,7 @@ fun VoiceTranscriptionBox(
                                 modifier = Modifier
                                     .width(1.dp)
                                     .height(10.dp)
-                                    .background(MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.25f))
+                                    .background(btnContentColor.copy(alpha = 0.3f))
                             )
                             Spacer(modifier = Modifier.width(5.dp))
 
@@ -202,32 +209,29 @@ fun VoiceTranscriptionBox(
                 val isError = text.startsWith("Error:")
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (isError) {
-                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    },
+                    color = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier
                         .padding(top = 6.dp)
                         .wrapContentSize()
-                        .clickable {
-                            if (isError) {
+                        .combinedClickable(
+                            onClick = {
+                                // Обычный тап: удаляем текст, возвращаем изначальную кнопку
                                 VoiceTranscriptionManager.transcriptions.remove(filePath)
-                            } else {
-                                clipboardManager.setText(AnnotatedString(text))
-                                Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                            onLongClick = {
+                                // Долгий тап: копируем в буфер обмена
+                                if (!isError) {
+                                    clipboardManager.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
                             }
-                        }
+                        )
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
-                            text = if (isError) "$text (tap to retry)" else text,
+                            text = if (isError) "$text (tap to close)" else text,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isError) {
-                                MaterialTheme.colorScheme.onErrorContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
                         )
                     }
