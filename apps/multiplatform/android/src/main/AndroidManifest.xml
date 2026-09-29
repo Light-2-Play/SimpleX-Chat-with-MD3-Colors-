@@ -68,7 +68,6 @@
             android:configChanges="uiMode"
             android:theme="@style/Theme.SimpleX">
             <!-- Блок с MAIN и LAUNCHER удален, теперь запуск идет строго через aliases -->
-        </activity>
             <!-- open simplex:/ connection URI -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
