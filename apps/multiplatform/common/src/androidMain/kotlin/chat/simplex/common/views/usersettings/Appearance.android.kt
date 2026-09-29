@@ -47,8 +47,8 @@ actual fun AppearanceView(m: ChatModel) {
   val appIcon = remember { mutableStateOf(findEnabledIcon()) }
   fun setAppIcon(newIcon: AppIcon) {
     if (appIcon.value == newIcon) return
-    val newComponent = ComponentName(APPLICATION_ID, "chat.simplex.app.MainActivity_${newIcon.name.lowercase()}")
-    val oldComponent = ComponentName(APPLICATION_ID, "chat.simplex.app.MainActivity_${appIcon.value.name.lowercase()}")
+    val newComponent = ComponentName(APPLICATION_ID, "$APPLICATION_ID.MainActivity_${newIcon.name.lowercase()}")
+val oldComponent = ComponentName(APPLICATION_ID, "$APPLICATION_ID.MainActivity_${appIcon.value.name.lowercase()}")
     androidAppContext.packageManager.setComponentEnabledSetting(
       newComponent,
       COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP
