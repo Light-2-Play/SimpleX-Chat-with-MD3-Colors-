@@ -146,14 +146,19 @@ class MainActivity: FragmentActivity() {
     setContent {
     CompositionLocalProvider(
         LocalVoiceTranscriptionWidget provides { cItem ->
-            // Достаем физический путь к аудиофайлу из кэша SimpleX
             val fileMeta = cItem.file
             val absolutePath = if (fileMeta != null) getLoadedFilePath(fileMeta) else null
             
             if (absolutePath != null) {
                 chat.simplex.app.ai.VoiceTranscriptionBox(
                     audioFile = java.io.File(absolutePath),
-                    modifier = androidx.compose.ui.Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                    isSent = cItem.chatDir.sent,
+                    modifier = androidx.compose.ui.Modifier.padding(
+                        start = if (cItem.chatDir.sent) 8.dp else 12.dp,
+                        end = if (cItem.chatDir.sent) 12.dp else 8.dp,
+                        top = 2.dp,
+                        bottom = 4.dp
+                    )
                 )
             }
         }
