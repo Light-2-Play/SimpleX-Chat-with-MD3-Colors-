@@ -243,7 +243,7 @@ data class DirectMonetColors(
 )
 
 @Composable
-fun rememberDirectMonetColors(activity: MainActivity): DirectMonetColors {
+fun rememberDirectMonetColors(context: android.content.Context = androidx.compose.ui.platform.LocalContext.current): DirectMonetColors {
     // Определяем тему: ориентируемся на текущую тему мессенджера
     val isLight = CurrentColors.value.colors.isLight
     
@@ -251,27 +251,27 @@ fun rememberDirectMonetColors(activity: MainActivity): DirectMonetColors {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (isLight) {
                 DirectMonetColors(
-                    surface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_50)),
-                    background = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_100)),
-                    onSurface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_900)),
-                    onSurfaceVariant = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_700)),
-                    primary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_600)),
-                    onPrimary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_0)),
-                    primaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_100)),
-                    onPrimaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_900)),
-                    outline = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_500)).copy(alpha = 0.5f)
+                    surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_50)),
+                    background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
+                    onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
+                    onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_700)),
+                    primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_600)),
+                    onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_0)),
+                    primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
+                    onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
+                    outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_500)).copy(alpha = 0.5f)
                 )
             } else {
                 DirectMonetColors(
-                    surface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_800)),
-                    background = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_900)),
-                    onSurface = Color(ContextCompat.getColor(activity, android.R.color.system_neutral1_100)),
-                    onSurfaceVariant = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_200)),
-                    primary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_200)),
-                    onPrimary = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_900)),
-                    primaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_700)).copy(alpha = 0.45f),
-                    onPrimaryContainer = Color(ContextCompat.getColor(activity, android.R.color.system_accent1_100)),
-                    outline = Color(ContextCompat.getColor(activity, android.R.color.system_neutral2_400)).copy(alpha = 0.5f)
+                    surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_800)),
+                    background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
+                    onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
+                    onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_200)),
+                    primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_200)),
+                    onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
+                    primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_700)).copy(alpha = 0.45f),
+                    onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
+                    outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_400)).copy(alpha = 0.5f)
                 )
             }
         } else {
