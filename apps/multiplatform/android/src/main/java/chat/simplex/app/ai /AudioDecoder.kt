@@ -24,11 +24,12 @@ object AudioDecoder {
 
         try {
             // Подключаем расшифрованный источник данных
-            if (fileSource.cryptoArgs != null) {
-                extractor.setDataSource(CryptoMediaSource(readCryptoFile(absoluteFilePath, fileSource.cryptoArgs)))
-            } else {
-                extractor.setDataSource(absoluteFilePath)
-            }
+            val cryptoArgs = fileSource.cryptoArgs
+if (cryptoArgs != null) {
+    extractor.setDataSource(CryptoMediaSource(readCryptoFile(absoluteFilePath, cryptoArgs)))
+} else {
+    extractor.setDataSource(absoluteFilePath)
+}
 
             var audioTrackIndex = -1
             var inputFormat: MediaFormat? = null
