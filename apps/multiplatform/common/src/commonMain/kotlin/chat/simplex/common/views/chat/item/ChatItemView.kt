@@ -40,6 +40,9 @@ import dev.icerock.moko.resources.StringResource
 import kotlinx.datetime.Clock
 import kotlin.math.*
 
+val LocalVoiceTranscriptionWidget = staticCompositionLocalOf<@Composable (ChatItem) -> Unit> {
+    { /* Пустышка для Desktop/iOS */ }
+}
 // TODO refactor so that FramedItemView can show all CIContent items if they're deleted (see Swift code)
 
 private val msgRectMaxRadius = 18.dp
@@ -574,8 +577,11 @@ fun ChatItemView(
               if (cItem.quotedItem == null && cItem.meta.itemForwarded == null && cItem.meta.itemDeleted == null && !cItem.meta.isLive) {
                 if (mc is MsgContent.MCText && isShortEmoji(cItem.content.text)) {
                   EmojiItemView(cItem, cInfo.timedMessagesTTL, showViaProxy = showViaProxy, showTimestamp = showTimestamp)
-                } else if (mc is MsgContent.MCVoice && cItem.content.text.isEmpty()) {
-                  CIVoiceView(mc.duration, cItem.file, cItem.meta.itemEdited, cItem.chatDir.sent, hasText = false, cItem, cInfo.timedMessagesTTL, showViaProxy = showViaProxy, showTimestamp = showTimestamp, longClick = { onLinkLongClick("") }, receiveFile = receiveFile)
+               } else if (mc is MsgContent.MCVoice && cItem.content.text.isEmpty()) {
+                  Column {
+                    CIVoiceView(mc.duration, cItem.file, cItem.meta.itemEdited, cItem.chatDir.sent, hasText = false, cItem, cInfo.timedMessagesTTL, showViaProxy = showViaProxy, showTimestamp = showTimestamp, longClick = { onLinkLongClick("") }, receiveFile = receiveFile)
+                    LocalVoiceTranscriptionWidget.current(cItem)
+                  }
                 } else {
                   framedItemView()
                 }
