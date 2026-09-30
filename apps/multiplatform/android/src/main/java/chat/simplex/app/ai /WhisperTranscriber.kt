@@ -1,6 +1,7 @@
 package chat.simplex.app.ai
 
 import android.content.Context
+import chat.simplex.common.model.CryptoFile
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
@@ -52,7 +53,7 @@ class WhisperTranscriber(private val context: Context) {
     }
 
     suspend fun transcribe(
-        audioFile: File,
+        fileSource: CryptoFile,
         modelType: WhisperModelType? = null
     ): Result<String> = withContext(Dispatchers.Default) {
         try {
@@ -65,7 +66,8 @@ class WhisperTranscriber(private val context: Context) {
             val decoder = targetModel.getDecoderFile(context)
             val tokens = targetModel.getTokensFile(context)
 
-            val samples = AudioDecoder.decodeTo16kMonoSamples(audioFile)
+            // Передаем CryptoFile напрямую в AudioDecoder
+            val samples = AudioDecoder.decodeTo16kMonoSamples(fileSource)
             if (samples.isEmpty()) {
                 return@withContext Result.failure(IllegalStateException("Failed to decode audio file or audio is empty"))
             }
@@ -74,13 +76,13 @@ class WhisperTranscriber(private val context: Context) {
                 whisper = OfflineWhisperModelConfig(
                     encoder = encoder.absolutePath,
                     decoder = decoder.absolutePath,
-                    language = "", // автоопределение языка
+                    language = "",
                     task = "transcribe",
                     tailPaddings = 0
                 ),
                 modelType = "whisper",
                 tokens = tokens.absolutePath,
-                numThreads = 4, // оптимально для мобильных многоядерных CPU
+                numThreads = 4,
                 debug = false,
                 provider = "cpu"
             )
@@ -88,7 +90,6 @@ class WhisperTranscriber(private val context: Context) {
             val config = OfflineRecognizerConfig(modelConfig = modelConfig)
             val recognizer = OfflineRecognizer(null, config)
 
-            // Разбиваем дорожку на сегменты до 29 секунд по естественным паузам
             val chunks = splitIntoChunks(samples, sampleRate = 16000)
             val fullTextBuilder = java.lang.StringBuilder()
 
@@ -125,13 +126,8 @@ class WhisperTranscriber(private val context: Context) {
         }
     }
 
-    /**
-     * Разрезает непрерывный аудиопоток на сегменты длительностью <= 29 секунд.
-     * Чтобы не резать слова на полуслове, точка разреза ищется в месте наименьшей
-     * звуковой энергии (пауза/вдох между предложениями) в окне 22–29 с.
-     */
     private fun splitIntoChunks(samples: FloatArray, sampleRate: Int): List<FloatArray> {
-        val maxChunkSamples = 29 * sampleRate // 29 секунд (с запасом под окно Whisper в 30 с)
+        val maxChunkSamples = 29 * sampleRate
         if (samples.size <= maxChunkSamples) {
             return listOf(samples)
         }
@@ -146,10 +142,9 @@ class WhisperTranscriber(private val context: Context) {
                 break
             }
 
-            // Ищем паузу в интервале от 22 до 29 секунд от начала чанка
             val searchStart = startIndex + (22 * sampleRate)
             val searchEnd = startIndex + maxChunkSamples
-            val windowSize = sampleRate / 10 // Окно замера энергии 100 мс (1600 сэмплов)
+            val windowSize = sampleRate / 10
 
             var minEnergy = Float.MAX_VALUE
             var bestSplitIndex = startIndex + maxChunkSamples
