@@ -332,9 +332,14 @@ fun FramedItemView(
                 }
               }
               is MsgContent.MCVoice -> {
-                CIVoiceView(mc.duration, ci.file, ci.meta.itemEdited, ci.chatDir.sent, hasText = true, ci, timedMessagesTTL = chatTTL, showViaProxy = showViaProxy, showTimestamp = showTimestamp, longClick = { onLinkLongClick("") }, receiveFile = receiveFile)
-                if (mc.text != "") {
-                  CIMarkdownText(chatsCtx, ci, chat, chatTTL, linkMode, uriHandler, showViaProxy = showViaProxy, showTimestamp = showTimestamp)
+                Column(
+                  horizontalAlignment = if (ci.chatDir.sent) Alignment.End else Alignment.Start
+                ) {
+                  CIVoiceView(mc.duration, ci.file, ci.meta.itemEdited, ci.chatDir.sent, hasText = true, ci, timedMessagesTTL = chatTTL, showViaProxy = showViaProxy, showTimestamp = showTimestamp, longClick = { onLinkLongClick("") }, receiveFile = receiveFile)
+                  if (mc.text != "") {
+                    CIMarkdownText(chatsCtx, ci, chat, chatTTL, linkMode, uriHandler, showViaProxy = showViaProxy, showTimestamp = showTimestamp)
+                  }
+                  LocalVoiceTranscriptionWidget.current(ci)
                 }
               }
               is MsgContent.MCFile -> ciFileView(ci, mc.text)
