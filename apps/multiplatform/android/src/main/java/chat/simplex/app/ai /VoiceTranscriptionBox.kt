@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import chat.simplex.app.DirectMonetColors
 import chat.simplex.app.rememberDirectMonetColors
 import chat.simplex.common.model.CryptoFile
-import kotlinx.coroutines.launch
 
 @Composable
 fun TranscribingWaveAnimation(
@@ -83,11 +82,9 @@ fun VoiceTranscriptionBox(
 ) {
     if (fileSource == null) return
 
-    // Достаем системные цвета Monet напрямую
     val monet = rememberDirectMonetColors()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
 
     val transcriber = remember { VoiceTranscriptionManager.getTranscriber(context) }
     val downloader = remember { VoiceTranscriptionManager.getDownloader(context) }
@@ -108,14 +105,12 @@ fun VoiceTranscriptionBox(
                 showDownloadDialog = false
                 currentModel = model
                 VoiceTranscriptionManager.setPreferredModel(context, model)
-                scope.launch {
-                    VoiceTranscriptionManager.transcribeAudio(context, fileSource, model)
-                }
+                // Запуск через независимый менеджер
+                VoiceTranscriptionManager.startTranscription(context, fileSource, model)
             }
         )
     }
 
-    // Динамические цвета кнопки в зависимости от направления сообщения (исходящее/входящее)
     val btnContainerColor = if (isSent) monet.primaryContainer else monet.surface
     val btnContentColor = if (isSent) monet.onPrimaryContainer else monet.onSurface
 
@@ -152,52 +147,51 @@ fun VoiceTranscriptionBox(
                     }
                 } else {
                     Surface(
-                            onClick = {
-                                currentModel = VoiceTranscriptionManager.getPreferredModel(context)
-                                if (!transcriber.isModelAvailable(currentModel)) {
-                                    showDownloadDialog = true
-                                } else {
-                                    scope.launch {
-                                        VoiceTranscriptionManager.transcribeAudio(context, fileSource, currentModel)
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = btnContainerColor,
-                            tonalElevation = 2.dp,
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "Voice to Text",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = btnContentColor
-                                )
-
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .height(10.dp)
-                                        .background(btnContentColor.copy(alpha = 0.35f))
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                Text(
-                                    text = "${currentModel.id.uppercase()} ▾",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = monet.primary,
-                                    modifier = Modifier.clickable {
-                                        showDownloadDialog = true
-                                    }
-                                )
+                        onClick = {
+                            currentModel = VoiceTranscriptionManager.getPreferredModel(context)
+                            if (!transcriber.isModelAvailable(currentModel)) {
+                                showDownloadDialog = true
+                            } else {
+                                // Запуск через независимый менеджер
+                                VoiceTranscriptionManager.startTranscription(context, fileSource, currentModel)
                             }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = btnContainerColor,
+                        tonalElevation = 2.dp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "Voice to Text",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = btnContentColor
+                            )
+
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(10.dp)
+                                    .background(btnContentColor.copy(alpha = 0.35f))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            Text(
+                                text = "${currentModel.id.uppercase()} ▾",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = monet.primary,
+                                modifier = Modifier.clickable {
+                                    showDownloadDialog = true
+                                }
+                            )
                         }
+                    }
                 }
             }
         }
@@ -218,11 +212,9 @@ fun VoiceTranscriptionBox(
                         .wrapContentSize()
                         .combinedClickable(
                             onClick = {
-                                // Клик скрывает текст и возвращает исходную кнопку
                                 VoiceTranscriptionManager.transcriptions.remove(filePath)
                             },
                             onLongClick = {
-                                // Долгий тап копирует распознанный текст в буфер
                                 if (!isError) {
                                     clipboardManager.setText(AnnotatedString(text))
                                     Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
