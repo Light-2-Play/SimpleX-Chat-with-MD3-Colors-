@@ -2,39 +2,22 @@ package chat.simplex.app.ai
 
 import android.content.Context
 import androidx.compose.runtime.mutableStateMapOf
+import chat.simplex.common.model.CryptoFile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.File
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 object VoiceTranscriptionManager {
-    private const val PREFS_NAME = "simplex_whisper_prefs"
-    private const val KEY_PREFERRED_MODEL = "preferred_model"
-
     private var transcriber: WhisperTranscriber? = null
     private var downloader: WhisperDownloader? = null
 
+    // Независимый скоуп приложения: никогда не отменится при скролле чата или пересоздании UI
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     val transcriptions = mutableStateMapOf<String, String>()
     val loadingStates = mutableStateMapOf<String, Boolean>()
-
-    fun getPreferredModel(context: Context): WhisperModelType {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = prefs.getString(KEY_PREFERRED_MODEL, null)
-        if (saved != null) {
-            try {
-                return WhisperModelType.valueOf(saved)
-            } catch (_: Exception) {}
-        }
-        return when {
-            WhisperModelType.BASE.isAvailable(context) -> WhisperModelType.BASE
-            WhisperModelType.TINY.isAvailable(context) -> WhisperModelType.TINY
-            else -> WhisperModelType.TINY
-        }
-    }
-
-    fun setPreferredModel(context: Context, modelType: WhisperModelType) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_PREFERRED_MODEL, modelType.name).apply()
-    }
 
     fun getTranscriber(context: Context): WhisperTranscriber {
         return transcriber ?: WhisperTranscriber(context.applicationContext).also { transcriber = it }
@@ -44,30 +27,60 @@ object VoiceTranscriptionManager {
         return downloader ?: WhisperDownloader(context.applicationContext).also { downloader = it }
     }
 
-    suspend fun transcribeAudio(
-        context: Context,
-        fileSource: chat.simplex.common.model.CryptoFile,
-        modelType: WhisperModelType? = null
-    ): String = withContext(Dispatchers.IO) {
-        val path = fileSource.filePath
-        val activeModel = modelType ?: getPreferredModel(context)
+    fun getPreferredModel(context: Context): WhisperModelType {
+        val prefs = context.getSharedPreferences("simplex_whisper", Context.MODE_PRIVATE)
+        val savedId = prefs.getString("preferred_model", null)
+        val model = if (savedId == WhisperModelType.BASE.id) WhisperModelType.BASE else WhisperModelType.TINY
+        val t = getTranscriber(context)
+        return if (t.isModelAvailable(model)) model else (t.getInstalledModel() ?: WhisperModelType.TINY)
+    }
 
-        transcriptions[path]?.let { return@withContext it }
+    fun setPreferredModel(context: Context, model: WhisperModelType) {
+        val prefs = context.getSharedPreferences("simplex_whisper", Context.MODE_PRIVATE)
+        prefs.edit().putString("preferred_model", model.id).apply()
+    }
+
+    /**
+     * Запускает распознавание в глобальном пуле потоков.
+     */
+    fun startTranscription(
+        context: Context,
+        fileSource: CryptoFile,
+        modelType: WhisperModelType? = null
+    ) {
+        val path = fileSource.filePath
+        if (loadingStates[path] == true) return
 
         loadingStates[path] = true
-        try {
-            val t = getTranscriber(context)
-            val result = t.transcribe(fileSource, activeModel)
-            val text = result.getOrElse { "Error: ${it.message}" }
-            
-            transcriptions[path] = text
-            text
-        } catch (e: Exception) {
-            val errorText = "Error: ${e.localizedMessage ?: "Unknown error"}"
-            transcriptions[path] = errorText
-            errorText
-        } finally {
-            loadingStates[path] = false
+        appScope.launch {
+            try {
+                val t = getTranscriber(context)
+                val result = t.transcribe(fileSource, modelType)
+                result.fold(
+                    onSuccess = { text ->
+                        transcriptions[path] = text
+                    },
+                    onFailure = { error ->
+                        transcriptions[path] = "Error: ${error.message ?: "Recognition failed"}"
+                    }
+                )
+            } catch (e: Throwable) {
+                if (e !is CancellationException) {
+                    transcriptions[path] = "Error: ${e.message ?: "Failed"}"
+                }
+            } finally {
+                loadingStates[path] = false
+            }
         }
     }
-}   
+
+    // Оставляем для обратной совместимости
+    suspend fun transcribeAudio(
+        context: Context,
+        fileSource: CryptoFile,
+        modelType: WhisperModelType? = null
+    ): String {
+        startTranscription(context, fileSource, modelType)
+        return transcriptions[fileSource.filePath] ?: ""
+    }
+}
