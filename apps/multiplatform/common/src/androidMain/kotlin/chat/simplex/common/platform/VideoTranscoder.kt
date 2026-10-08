@@ -23,17 +23,6 @@ object VideoTranscoder {
     var outputSurface: CodecOutputSurface? = null
 
     return try {
-      // 1. Считываем исходный угол поворота из метаданных ролика
-      val rotation = try {
-        val retriever = MediaMetadataRetriever()
-        retriever.setDataSource(inputFile.absolutePath)
-        val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-        retriever.release()
-        rot
-      } catch (_: Exception) {
-        0
-      }
-
       extractor.setDataSource(inputFile.absolutePath)
 
       var videoTrackIndex = -1
@@ -55,16 +44,40 @@ object VideoTranscoder {
 
       if (videoTrackIndex == -1 || inputVideoFormat == null) return false
 
-      val srcWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
-      val srcHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+      // 1. Извлекаем исходный угол поворота
+      val rotation = try {
+        var rot = 0
+        if (inputVideoFormat.containsKey(MediaFormat.KEY_ROTATION)) {
+          rot = inputVideoFormat.getInteger(MediaFormat.KEY_ROTATION)
+        }
+        if (rot == 0) {
+          val retriever = MediaMetadataRetriever()
+          retriever.setDataSource(inputFile.absolutePath)
+          rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+          retriever.release()
+        }
+        rot
+      } catch (_: Exception) {
+        0
+      }
 
-      // Рассчитываем пропорциональное сжатие до 1080p
-      val (targetWidth, targetHeight) = if (srcWidth >= srcHeight) {
-        val scale = 1080f / srcHeight.toFloat()
-        ((srcWidth * scale).toInt() and 1.inv()) to 1080
+      val rawWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
+      val rawHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+
+      // 2. Определяем реальную визуальную ориентацию видео
+      val isPortrait = (rotation == 90 || rotation == 270)
+      val visualWidth = if (isPortrait) rawHeight else rawWidth
+      val visualHeight = if (isPortrait) rawWidth else rawHeight
+
+      // 3. Рассчитываем точные размеры без искажения пропорций
+      val (targetWidth, targetHeight) = if (isPortrait) {
+        // Вертикальное видео: ширина фиксируется на 1080p
+        val scale = 1080f / visualWidth.toFloat()
+        1080 to ((visualHeight * scale).toInt() and 1.inv())
       } else {
-        val scale = 1080f / srcWidth.toFloat()
-        1080 to ((srcHeight * scale).toInt() and 1.inv())
+        // Горизонтальное видео: высота фиксируется на 1080p
+        val scale = 1080f / visualHeight.toFloat()
+        ((visualWidth * scale).toInt() and 1.inv()) to 1080
       }
 
       val outputVideoFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight).apply {
@@ -79,7 +92,8 @@ object VideoTranscoder {
       }
 
       eglCore = EglCore(encoder.createInputSurface())
-      outputSurface = CodecOutputSurface(targetWidth, targetHeight)
+      // Передаем угол в рендерер для аппаратного разворота кадра
+      outputSurface = CodecOutputSurface(targetWidth, targetHeight, rotation)
 
       val videoMime = inputVideoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
       decoder = MediaCodec.createDecoderByType(videoMime).apply {
@@ -89,12 +103,8 @@ object VideoTranscoder {
       encoder.start()
       decoder.start()
 
-      muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
-        // Переносим исходную ориентацию ролика в новый файл
-        if (rotation != 0) {
-          setOrientationHint(rotation)
-        }
-      }
+      // Флаг ориентации оставляем 0: видео запекается сразу в правильном положении
+      muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
       var muxerVideoTrack = -1
       var muxerAudioTrack = -1
@@ -172,7 +182,7 @@ object VideoTranscoder {
         }
       }
 
-      // Перенос звуковой дорожки
+      // Проброс исходной аудиодорожки
       if (audioTrackIndex != -1 && muxerStarted) {
         extractor.unselectTrack(videoTrackIndex)
         extractor.selectTrack(audioTrackIndex)
@@ -248,7 +258,12 @@ object VideoTranscoder {
     }
   }
 
-  private class CodecOutputSurface(private val width: Int, private val height: Int) : SurfaceTexture.OnFrameAvailableListener {
+  private class CodecOutputSurface(
+    private val width: Int,
+    private val height: Int,
+    private val rotation: Int
+  ) : SurfaceTexture.OnFrameAvailableListener {
+
     private val surfaceTexture: SurfaceTexture
     val surface: android.view.Surface
     private val lock = Object()
@@ -256,6 +271,8 @@ object VideoTranscoder {
     private var program = 0
     private var texId = 0
     private val transformMatrix = FloatArray(16)
+    private val finalMatrix = FloatArray(16)
+    private val rotMatrix = FloatArray(16)
     private var uTexMatrixLoc = -1
 
     init {
@@ -292,13 +309,23 @@ object VideoTranscoder {
     }
 
     fun drawImage() {
-      // Считываем системную матрицу трансформации каждого кадра (исправляет Y-flip)
       surfaceTexture.getTransformMatrix(transformMatrix)
+
+      // Поворачиваем текстурные координаты вокруг центра кадра (0.5, 0.5)
+      if (rotation != 0) {
+        Matrix.setIdentityM(rotMatrix, 0)
+        Matrix.translateM(rotMatrix, 0, 0.5f, 0.5f, 0f)
+        Matrix.rotateM(rotMatrix, 0, -rotation.toFloat(), 0f, 0f, 1f)
+        Matrix.translateM(rotMatrix, 0, -0.5f, -0.5f, 0f)
+        Matrix.multiplyMM(finalMatrix, 0, transformMatrix, 0, rotMatrix, 0)
+      } else {
+        System.arraycopy(transformMatrix, 0, finalMatrix, 0, 16)
+      }
 
       GLES20.glViewport(0, 0, width, height)
       GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
       GLES20.glUseProgram(program)
-      GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, transformMatrix, 0)
+      GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, finalMatrix, 0)
       GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
