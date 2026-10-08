@@ -15,6 +15,8 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import java.net.URLDecoder
+import java.util.zip.GZIPInputStream
 import java.util.zip.Inflater
 import kotlin.concurrent.thread
 
@@ -119,8 +121,16 @@ object SingBoxService {
           try {
             proc.inputStream.bufferedReader().useLines { lines ->
               lines.forEach { line ->
-                Log.d(TAG, line)
-                lastLog = line
+                val clean = line.replace(Regex("\u001B\\[[;\\d]*m"), "").trim()
+                Log.d(TAG, clean)
+                if (clean.contains("FATAL", ignoreCase = true) ||
+                  clean.contains("ERROR", ignoreCase = true) ||
+                  clean.contains("panic", ignoreCase = true)
+                ) {
+                  lastLog = clean
+                } else if (lastLog.isEmpty()) {
+                  lastLog = clean
+                }
               }
             }
           } catch (_: Exception) {}
@@ -145,7 +155,9 @@ object SingBoxService {
           showToast(context, "Proxy connected ($LOCAL_PORT)")
         } else {
           val errorDetail = if (!proc.isAlive) {
-            "crashed (exit code ${proc.exitValue()}): $lastLog"
+            val exitCode = proc.exitValue()
+            val msg = if (lastLog.isNotBlank()) lastLog else "code $exitCode"
+            "crashed (exit code $exitCode): $msg"
           } else {
             "port $LOCAL_PORT timeout"
           }
@@ -301,6 +313,7 @@ object SingBoxService {
       }
     } catch (_: Exception) {}
 
+    // 1. Amnezia vpn:// URI
     if (input.startsWith("vpn://", ignoreCase = true)) {
       val extractedConf = decodeAmneziaVpnUri(input)
       if (!extractedConf.isNullOrBlank()) {
@@ -308,6 +321,7 @@ object SingBoxService {
       }
     }
 
+    // 2. HTTP subscription
     val content = if (input.startsWith("http://", ignoreCase = true) || input.startsWith("https://", ignoreCase = true)) {
       try {
         val downloaded = downloadUrl(input)
@@ -325,78 +339,68 @@ object SingBoxService {
       input
     }
 
+    // 3. VLESS
     val vlessLine = content.lines().firstOrNull { it.trim().startsWith("vless://", ignoreCase = true) }?.trim()
     if (vlessLine != null) {
       parseVlessUri(vlessLine)?.let { return it }
     }
 
+    // 4. AmneziaWG 2.0 / 3.0 / 3.1 (.conf or awg://)
     parseAwg(content)?.let { return it }
 
     return parseVlessUri(content)
   }
 
+  /**
+   * Universal decoder for Amnezia vpn:// URI (v2.0, v3.0, v3.1, Amnezia Free)
+   */
   private fun decodeAmneziaVpnUri(vpnUri: String): String? {
     return try {
-      val b64 = vpnUri.trim().substring(6).substringBefore("#").trim()
+      var raw = vpnUri.trim()
+      if (raw.startsWith("vpn://", ignoreCase = true)) {
+        raw = raw.substring(6)
+      }
+      raw = raw.substringBefore("#").trim()
+      if (raw.contains("%")) {
+        raw = URLDecoder.decode(raw, "UTF-8")
+      }
+      raw = raw.replace("\\s".toRegex(), "")
+
+      val mod = raw.length % 4
+      if (mod != 0) {
+        raw += "=".repeat(4 - mod)
+      }
+
       val rawBytes = try {
-        Base64.decode(b64, Base64.DEFAULT)
+        Base64.decode(raw, Base64.DEFAULT)
       } catch (_: Exception) {
-        Base64.decode(b64, Base64.URL_SAFE)
+        Base64.decode(raw, Base64.URL_SAFE)
       }
 
-      var jsonStr: String? = null
-      val rawText = String(rawBytes, Charsets.UTF_8).trim()
+      val decompressed = decompressPayload(rawBytes) ?: return null
 
-      if (rawText.startsWith("{")) {
-        jsonStr = rawText
-      } else {
-        for (offset in listOf(4, 0)) {
-          if (rawBytes.size <= offset) continue
+      if (decompressed.contains("[Interface]", ignoreCase = true) && !decompressed.trim().startsWith("{")) {
+        return decompressed
+      }
+
+      if (decompressed.trim().startsWith("{") || decompressed.trim().startsWith("[")) {
+        val root: Any? = try {
+          JSONObject(decompressed)
+        } catch (_: Exception) {
           try {
-            val inflater = Inflater()
-            inflater.setInput(rawBytes, offset, rawBytes.size - offset)
-            val bos = ByteArrayOutputStream()
-            val buffer = ByteArray(4096)
-            while (!inflater.finished()) {
-              val count = inflater.inflate(buffer)
-              if (count <= 0 && inflater.needsInput()) break
-              bos.write(buffer, 0, count)
-            }
-            inflater.end()
-            val result = bos.toString("UTF-8").trim()
-            if (result.startsWith("{")) {
-              jsonStr = result
-              break
-            }
-          } catch (_: Exception) {}
+            JSONArray(decompressed)
+          } catch (_: Exception) {
+            null
+          }
         }
-      }
-
-      if (jsonStr == null) return null
-
-      val root = JSONObject(jsonStr)
-      val containers = root.optJSONArray("containers") ?: JSONArray()
-      for (i in 0 until containers.length()) {
-        val c = containers.getJSONObject(i)
-        val containerName = c.optString("container")
-        val subObj = c.optJSONObject("awg")
-          ?: c.optJSONObject("wireguard")
-          ?: c.optJSONObject(containerName)
-
-        val lastConfig = subObj?.optString("last_config")
-        if (!lastConfig.isNullOrBlank()) {
-          return if (lastConfig.contains("[Interface]")) {
-            lastConfig
-          } else {
-            try {
-              val decoded = String(Base64.decode(lastConfig, Base64.DEFAULT))
-              if (decoded.contains("[Interface]")) decoded else lastConfig
-            } catch (_: Exception) {
-              lastConfig
-            }
+        if (root != null) {
+          val extracted = findConfigInJson(root)
+          if (!extracted.isNullOrBlank()) {
+            return extracted
           }
         }
       }
+
       null
     } catch (e: Exception) {
       Log.e(TAG, "Failed to decode vpn:// URI: ${e.message}")
@@ -404,16 +408,112 @@ object SingBoxService {
     }
   }
 
+  private fun decompressPayload(bytes: ByteArray): String? {
+    val directText = String(bytes, Charsets.UTF_8).trim()
+    if (directText.startsWith("{") || directText.contains("[Interface]")) {
+      return directText
+    }
+
+    // Qt qCompress (offset 4) and zlib (offset 0)
+    for (offset in listOf(4, 0)) {
+      if (bytes.size <= offset) continue
+      try {
+        val inflater = Inflater()
+        inflater.setInput(bytes, offset, bytes.size - offset)
+        val bos = ByteArrayOutputStream()
+        val buffer = ByteArray(4096)
+        while (!inflater.finished()) {
+          val count = inflater.inflate(buffer)
+          if (count <= 0 && inflater.needsInput()) break
+          bos.write(buffer, 0, count)
+        }
+        inflater.end()
+        val res = bos.toString("UTF-8").trim()
+        if (res.startsWith("{") || res.contains("[Interface]")) {
+          return res
+        }
+      } catch (_: Exception) {}
+    }
+
+    // GZIP
+    try {
+      val gis = GZIPInputStream(bytes.inputStream())
+      val res = gis.bufferedReader(Charsets.UTF_8).readText().trim()
+      if (res.startsWith("{") || res.contains("[Interface]")) {
+        return res
+      }
+    } catch (_: Exception) {}
+
+    return if (directText.isNotEmpty()) directText else null
+  }
+
+  /**
+   * Recursive config finder inside arbitrary JSON payloads
+   */
+  private fun findConfigInJson(node: Any): String? {
+    when (node) {
+      is String -> {
+        val trimmed = node.trim()
+        if (trimmed.contains("[Interface]", ignoreCase = true)) {
+          return if (trimmed.startsWith("{")) {
+            try {
+              findConfigInJson(JSONObject(trimmed)) ?: trimmed
+            } catch (_: Exception) {
+              trimmed
+            }
+          } else {
+            trimmed
+          }
+        }
+        if (trimmed.length > 24 && !trimmed.contains(" ")) {
+          try {
+            val decoded = String(Base64.decode(trimmed, Base64.DEFAULT), Charsets.UTF_8)
+            if (decoded.contains("[Interface]", ignoreCase = true)) {
+              return decoded
+            }
+          } catch (_: Exception) {}
+        }
+      }
+      is JSONObject -> {
+        val priorityKeys = listOf("last_config", "config", "client_config", "awg", "amnezia-awg", "wireguard", "containers")
+        for (k in priorityKeys) {
+          if (node.has(k)) {
+            val res = findConfigInJson(node.get(k))
+            if (!res.isNullOrBlank()) return res
+          }
+        }
+        val keys = node.keys()
+        while (keys.hasNext()) {
+          val k = keys.next()
+          if (k !in priorityKeys) {
+            val res = findConfigInJson(node.get(k))
+            if (!res.isNullOrBlank()) return res
+          }
+        }
+      }
+      is JSONArray -> {
+        for (i in 0 until node.length()) {
+          val res = findConfigInJson(node.get(i))
+          if (!res.isNullOrBlank()) return res
+        }
+      }
+    }
+    return null
+  }
+
   private fun parseAwg(raw: String): JSONObject? {
     val trimmed = raw.trim()
 
+    // awg:// links
     if (trimmed.startsWith("awg://", ignoreCase = true)) {
-      val uriPart = trimmed.substring(6)
       val tag = if (trimmed.contains("#")) trimmed.substringAfter("#") else "awg-proxy"
-      val beforeFragment = uriPart.substringBefore("#")
+      val uriPart = trimmed.removePrefix("awg://").removePrefix("AWG://").substringBefore("#").trim()
 
       try {
-        val decoded = String(Base64.decode(beforeFragment, Base64.DEFAULT))
+        var b64 = uriPart
+        val mod = b64.length % 4
+        if (mod != 0) b64 += "=".repeat(4 - mod)
+        val decoded = String(Base64.decode(b64, Base64.DEFAULT or Base64.URL_SAFE), Charsets.UTF_8)
         if (decoded.contains("[Interface]", ignoreCase = true) || decoded.contains("PrivateKey", ignoreCase = true)) {
           return parseAwgConf(decoded, tag)
         }
@@ -434,7 +534,10 @@ object SingBoxService {
           ?: "10.0.0.2/32"
 
         val localAddresses = JSONArray().apply {
-          addressParam.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { put(it) }
+          addressParam.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach {
+            val cidr = if (!it.contains("/")) if (it.contains(":")) "$it/128" else "$it/32" else it
+            put(cidr)
+          }
         }
 
         if (server.isNotEmpty() && privateKey.isNotEmpty() && peerPublicKey.isNotEmpty()) {
@@ -447,19 +550,31 @@ object SingBoxService {
             put("private_key", privateKey)
             put("peer_public_key", peerPublicKey)
 
-            uri.getQueryParameter("preshared_key")?.takeIf { it.isNotBlank() }?.let { put("pre_shared_key", it) }
-            uri.getQueryParameter("psk")?.takeIf { it.isNotBlank() }?.let { put("pre_shared_key", it) }
+            (uri.getQueryParameter("preshared_key") ?: uri.getQueryParameter("psk"))?.takeIf { it.isNotBlank() }?.let { put("pre_shared_key", it) }
             uri.getQueryParameter("mtu")?.toIntOrNull()?.let { put("mtu", it) }
+
+            uri.getQueryParameter("reserved")?.let { rStr ->
+              val rList = rStr.split(",").mapNotNull { it.trim().toIntOrNull() }
+              if (rList.isNotEmpty()) {
+                put("reserved", JSONArray().apply { rList.forEach { put(it) } })
+              }
+            }
+
+            fun parseQueryMagic(param: String?): Long? {
+              if (param == null) return null
+              val s = param.trim()
+              return if (s.startsWith("0x", ignoreCase = true)) s.substring(2).toLongOrNull(16) else s.toLongOrNull()?.let { it and 0xFFFFFFFFL }
+            }
 
             (uri.getQueryParameter("jc") ?: uri.getQueryParameter("junk_packet_count"))?.toIntOrNull()?.let { put("junk_packet_count", it) }
             (uri.getQueryParameter("jmin") ?: uri.getQueryParameter("junk_packet_min_size"))?.toIntOrNull()?.let { put("junk_packet_min_size", it) }
             (uri.getQueryParameter("jmax") ?: uri.getQueryParameter("junk_packet_max_size"))?.toIntOrNull()?.let { put("junk_packet_max_size", it) }
             (uri.getQueryParameter("s1") ?: uri.getQueryParameter("init_packet_junk_size"))?.toIntOrNull()?.let { put("init_packet_junk_size", it) }
             (uri.getQueryParameter("s2") ?: uri.getQueryParameter("response_packet_junk_size"))?.toIntOrNull()?.let { put("response_packet_junk_size", it) }
-            (uri.getQueryParameter("h1") ?: uri.getQueryParameter("init_packet_magic_header"))?.toLongOrNull()?.let { put("init_packet_magic_header", it) }
-            (uri.getQueryParameter("h2") ?: uri.getQueryParameter("response_packet_magic_header"))?.toLongOrNull()?.let { put("response_packet_magic_header", it) }
-            (uri.getQueryParameter("h3") ?: uri.getQueryParameter("underload_packet_magic_header"))?.toLongOrNull()?.let { put("underload_packet_magic_header", it) }
-            (uri.getQueryParameter("h4") ?: uri.getQueryParameter("transport_packet_magic_header"))?.toLongOrNull()?.let { put("transport_packet_magic_header", it) }
+            parseQueryMagic(uri.getQueryParameter("h1") ?: uri.getQueryParameter("init_packet_magic_header"))?.let { put("init_packet_magic_header", it) }
+            parseQueryMagic(uri.getQueryParameter("h2") ?: uri.getQueryParameter("response_packet_magic_header"))?.let { put("response_packet_magic_header", it) }
+            parseQueryMagic(uri.getQueryParameter("h3") ?: uri.getQueryParameter("underload_packet_magic_header"))?.let { put("underload_packet_magic_header", it) }
+            parseQueryMagic(uri.getQueryParameter("h4") ?: uri.getQueryParameter("transport_packet_magic_header"))?.let { put("transport_packet_magic_header", it) }
           }
         }
       } catch (e: Exception) {
@@ -490,11 +605,21 @@ object SingBoxService {
       var h2: Long? = null
       var h3: Long? = null
       var h4: Long? = null
+      var reservedArray: JSONArray? = null
 
       var peerPublicKey = ""
       var preSharedKey = ""
       var server = ""
       var serverPort = 51820
+
+      fun parseMagic(str: String): Long? {
+        val s = str.trim()
+        return if (s.startsWith("0x", ignoreCase = true)) {
+          s.substring(2).toLongOrNull(16)
+        } else {
+          s.toLongOrNull()
+        }?.let { it and 0xFFFFFFFFL }
+      }
 
       for (rawLine in confText.lines()) {
         val line = rawLine.substringBefore('#').substringBefore(';').trim()
@@ -517,7 +642,14 @@ object SingBoxService {
               "address" -> {
                 value.split(",").forEach { addr ->
                   val trimmedAddr = addr.trim()
-                  if (trimmedAddr.isNotEmpty()) localAddresses.put(trimmedAddr)
+                  if (trimmedAddr.isNotEmpty()) {
+                    val cidr = if (!trimmedAddr.contains("/")) {
+                      if (trimmedAddr.contains(":")) "$trimmedAddr/128" else "$trimmedAddr/32"
+                    } else {
+                      trimmedAddr
+                    }
+                    localAddresses.put(cidr)
+                  }
                 }
               }
               "mtu" -> mtu = value.toIntOrNull()
@@ -526,10 +658,16 @@ object SingBoxService {
               "jmax" -> jmax = value.toIntOrNull()
               "s1" -> s1 = value.toIntOrNull()
               "s2" -> s2 = value.toIntOrNull()
-              "h1" -> h1 = value.toLongOrNull()
-              "h2" -> h2 = value.toLongOrNull()
-              "h3" -> h3 = value.toLongOrNull()
-              "h4" -> h4 = value.toLongOrNull()
+              "h1" -> h1 = parseMagic(value)
+              "h2" -> h2 = parseMagic(value)
+              "h3" -> h3 = parseMagic(value)
+              "h4" -> h4 = parseMagic(value)
+              "reserved" -> {
+                val rList = value.split(",").mapNotNull { it.trim().toIntOrNull() }
+                if (rList.isNotEmpty()) {
+                  reservedArray = JSONArray().apply { rList.forEach { put(it) } }
+                }
+              }
             }
           }
           "peer" -> {
@@ -543,6 +681,12 @@ object SingBoxService {
                   serverPort = value.substring(lastColon + 1).trim().toIntOrNull() ?: 51820
                 } else {
                   server = value
+                }
+              }
+              "reserved" -> {
+                val rList = value.split(",").mapNotNull { it.trim().toIntOrNull() }
+                if (rList.isNotEmpty()) {
+                  reservedArray = JSONArray().apply { rList.forEach { put(it) } }
                 }
               }
             }
@@ -566,6 +710,7 @@ object SingBoxService {
 
         if (preSharedKey.isNotBlank()) put("pre_shared_key", preSharedKey)
         if (mtu != null) put("mtu", mtu)
+        if (reservedArray != null) put("reserved", reservedArray)
 
         if (jc != null) put("junk_packet_count", jc)
         if (jmin != null) put("junk_packet_min_size", jmin)
