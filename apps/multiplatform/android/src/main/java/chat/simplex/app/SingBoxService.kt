@@ -9,11 +9,13 @@ import android.util.Log
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import java.util.zip.Inflater
 import kotlin.concurrent.thread
 
 object SingBoxService {
@@ -34,7 +36,6 @@ object SingBoxService {
   private const val KEY_CUSTOM_KEY = "custom_key"
   const val DEFAULT_SERVER_LIMIT = 25
 
-  // === Настройки пула (25, 50, 100) ===
   fun getServerLimit(context: Context): Int {
     val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     return sp.getInt(KEY_SERVER_LIMIT, DEFAULT_SERVER_LIMIT)
@@ -45,7 +46,6 @@ object SingBoxService {
     sp.edit().putInt(KEY_SERVER_LIMIT, limit).apply()
   }
 
-  // === Настройки кастомного VLESS / AWG / Подписки ===
   fun isCustomMode(context: Context): Boolean {
     val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     return sp.getBoolean(KEY_CUSTOM_MODE, false)
@@ -73,7 +73,7 @@ object SingBoxService {
   fun toggle(context: Context) {
     if (isRunning) {
       stop()
-      showToast(context, "Прокси отключен")
+      showToast(context, "Proxy disconnected")
     } else {
       start(context)
     }
@@ -96,7 +96,7 @@ object SingBoxService {
         val binaryFile = File(context.applicationInfo.nativeLibraryDir, "libsingbox.so")
 
         if (!binaryFile.exists()) {
-          showToast(context, "Ошибка: libsingbox.so не найден")
+          showToast(context, "Error: libsingbox.so not found")
           return@thread
         }
 
@@ -142,18 +142,18 @@ object SingBoxService {
 
         if (portOpen) {
           isRunning = true
-          showToast(context, "Прокси подключен ($LOCAL_PORT)")
+          showToast(context, "Proxy connected ($LOCAL_PORT)")
         } else {
           val errorDetail = if (!proc.isAlive) {
-            "вылет (код ${proc.exitValue()}): $lastLog"
+            "crashed (exit code ${proc.exitValue()}):$lastLog"
           } else {
-            "таймаут порта $LOCAL_PORT"
+            "port $LOCAL_PORT timeout"
           }
           stop()
-          showToast(context, "Ошибка: $errorDetail")
+          showToast(context, "Error: $errorDetail")
         }
       } catch (e: Exception) {
-        showToast(context, "Сбой: ${e.message}")
+        showToast(context, "Failure: ${e.message}")
       }
     }
   }
@@ -170,12 +170,10 @@ object SingBoxService {
     val configFile = File(context.filesDir, "singbox_active.json")
     val root = JSONObject()
 
-    // 1. Логирование
     root.put("log", JSONObject().apply {
       put("level", "warn")
     })
 
-    // 2. Входящий SOCKS5
     val socksInbound = JSONObject().apply {
       put("type", "socks")
       put("tag", "socks-in")
@@ -184,7 +182,6 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // 3. DNS
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
         put(JSONObject().apply {
@@ -206,17 +203,15 @@ object SingBoxService {
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
-    // 4. Проверяем режим: Кастомный VLESS/AWG или Автоподбор
     if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
       val customOutbound = resolveCustomOutbound(getCustomKey(context))
       if (customOutbound != null) {
         cleanOutbounds.put(customOutbound)
         targetTag = customOutbound.optString("tag", "custom-proxy")
       } else {
-        throw IllegalArgumentException("Не удалось распознать VLESS / AWG ключ или подписку")
+        throw IllegalArgumentException("Failed to parse VLESS, AWG, or Amnezia configuration")
       }
     } else {
-      // Режим автоподбора серверов
       var rawJson: String? = null
       for (url in SUBSCRIPTION_URLS) {
         try {
@@ -226,13 +221,13 @@ object SingBoxService {
             break
           }
         } catch (e: Exception) {
-          Log.w(TAG, "Ошибка загрузки $url: ${e.message}")
+          Log.w(TAG, "Failed to download subscription from $url:${e.message}")
         }
       }
 
       if (rawJson.isNullOrBlank()) {
         if (configFile.exists()) return configFile
-        throw IllegalStateException("Не удалось загрузить подписку")
+        throw IllegalStateException("Failed to download subscription")
       }
 
       val sourceRoot = JSONObject(rawJson)
@@ -280,7 +275,6 @@ object SingBoxService {
 
     root.put("outbounds", cleanOutbounds)
 
-    // 5. Маршрутизация
     val route = JSONObject().apply {
       val rules = JSONArray().apply {
         put(JSONObject().apply {
@@ -297,11 +291,22 @@ object SingBoxService {
     return configFile
   }
 
-  /**
-   * Разбирает ключ: vless://, awg://, .conf или скачивает данные по HTTP
-   */
   private fun resolveCustomOutbound(rawInput: String): JSONObject? {
-    val input = rawInput.trim()
+    var input = rawInput.trim()
+
+    try {
+      val file = File(input)
+      if (file.exists() && file.isFile) {
+        input = file.readText().trim()
+      }
+    } catch (_: Exception) {}
+
+    if (input.startsWith("vpn://", ignoreCase = true)) {
+      val extractedConf = decodeAmneziaVpnUri(input)
+      if (!extractedConf.isNullOrBlank()) {
+        parseAwgConf(extractedConf, "amnezia-free")?.let { return it }
+      }
+    }
 
     val content = if (input.startsWith("http://", ignoreCase = true) || input.startsWith("https://", ignoreCase = true)) {
       try {
@@ -313,7 +318,7 @@ object SingBoxService {
         }
         decoded.trim()
       } catch (e: Exception) {
-        Log.e(TAG, "Ошибка загрузки кастомной ссылки: ${e.message}")
+        Log.e(TAG, "Failed to download custom link: ${e.message}")
         input
       }
     } else {
@@ -330,9 +335,75 @@ object SingBoxService {
     return parseVlessUri(content)
   }
 
-  /**
-   * Распознавание формата AmneziaWG (awg:// URI или .conf файл)
-   */
+  private fun decodeAmneziaVpnUri(vpnUri: String): String? {
+    return try {
+      val b64 = vpnUri.trim().substring(6).substringBefore("#").trim()
+      val rawBytes = try {
+        Base64.decode(b64, Base64.DEFAULT)
+      } catch (_: Exception) {
+        Base64.decode(b64, Base64.URL_SAFE)
+      }
+
+      var jsonStr: String? = null
+      val rawText = String(rawBytes, Charsets.UTF_8).trim()
+
+      if (rawText.startsWith("{")) {
+        jsonStr = rawText
+      } else {
+        for (offset in listOf(4, 0)) {
+          if (rawBytes.size <= offset) continue
+          try {
+            val inflater = Inflater()
+            inflater.setInput(rawBytes, offset, rawBytes.size - offset)
+            val bos = ByteArrayOutputStream()
+            val buffer = ByteArray(4096)
+            while (!inflater.finished()) {
+              val count = inflater.inflate(buffer)
+              if (count <= 0 && inflater.needsInput()) break
+              bos.write(buffer, 0, count)
+            }
+            inflater.end()
+            val result = bos.toString("UTF-8").trim()
+            if (result.startsWith("{")) {
+              jsonStr = result
+              break
+            }
+          } catch (_: Exception) {}
+        }
+      }
+
+      if (jsonStr == null) return null
+
+      val root = JSONObject(jsonStr)
+      val containers = root.optJSONArray("containers") ?: JSONArray()
+      for (i in 0 until containers.length()) {
+        val c = containers.getJSONObject(i)
+        val containerName = c.optString("container")
+        val subObj = c.optJSONObject("awg")
+          ?: c.optJSONObject("wireguard")
+          ?: c.optJSONObject(containerName)
+
+        val lastConfig = subObj?.optString("last_config")
+        if (!lastConfig.isNullOrBlank()) {
+          return if (lastConfig.contains("[Interface]")) {
+            lastConfig
+          } else {
+            try {
+              val decoded = String(Base64.decode(lastConfig, Base64.DEFAULT))
+              if (decoded.contains("[Interface]")) decoded else lastConfig
+            } catch (_: Exception) {
+              lastConfig
+            }
+          }
+        }
+      }
+      null
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to decode vpn:// URI: ${e.message}")
+      null
+    }
+  }
+
   private fun parseAwg(raw: String): JSONObject? {
     val trimmed = raw.trim()
 
@@ -392,7 +463,7 @@ object SingBoxService {
           }
         }
       } catch (e: Exception) {
-        Log.e(TAG, "Ошибка парсинга awg:// ссылки: ${e.message}")
+        Log.e(TAG, "Failed to parse awg:// link: ${e.message}")
       }
     }
 
@@ -403,9 +474,6 @@ object SingBoxService {
     return null
   }
 
-  /**
-   * Разбор текстового .conf конфига WireGuard / AmneziaWG
-   */
   private fun parseAwgConf(confText: String, defaultTag: String): JSONObject? {
     try {
       var currentSection = ""
@@ -429,8 +497,8 @@ object SingBoxService {
       var serverPort = 51820
 
       for (rawLine in confText.lines()) {
-        val line = rawLine.trim()
-        if (line.isEmpty() || line.startsWith("#") || line.startsWith(";")) continue
+        val line = rawLine.substringBefore('#').substringBefore(';').trim()
+        if (line.isEmpty()) continue
 
         if (line.startsWith("[") && line.endsWith("]")) {
           currentSection = line.substring(1, line.length - 1).trim().lowercase()
@@ -440,7 +508,7 @@ object SingBoxService {
         val parts = line.split("=", limit = 2)
         if (parts.size != 2) continue
         val key = parts[0].trim().lowercase()
-        val value = parts[1].trim()
+        val value = parts[1].trim().removeSurrounding("\"").removeSurrounding("'")
 
         when (currentSection) {
           "interface" -> {
@@ -483,7 +551,7 @@ object SingBoxService {
       }
 
       if (server.isBlank() || privateKey.isBlank() || peerPublicKey.isBlank()) {
-        Log.w(TAG, "В AWG конфигурации отсутствуют обязательные поля Endpoint, PrivateKey или PublicKey")
+        Log.w(TAG, "Missing Endpoint, PrivateKey, or PublicKey in AWG configuration")
         return null
       }
 
@@ -510,7 +578,7 @@ object SingBoxService {
         if (h4 != null) put("transport_packet_magic_header", h4)
       }
     } catch (e: Exception) {
-      Log.e(TAG, "Ошибка разбора AWG conf: ${e.message}")
+      Log.e(TAG, "Error parsing AWG conf: ${e.message}")
       return null
     }
   }
@@ -538,56 +606,3 @@ object SingBoxService {
         put("server", server)
         put("server_port", port)
         put("uuid", uuid)
-        if (!flow.isNullOrBlank()) put("flow", flow)
-
-        if (security.equals("reality", ignoreCase = true)) {
-          put("tls", JSONObject().apply {
-            put("enabled", true)
-            put("server_name", sni)
-            put("utls", JSONObject().put("enabled", true).put("fingerprint", fp))
-            put("reality", JSONObject().apply {
-              put("enabled", true)
-              if (pbk.isNotBlank()) put("public_key", pbk)
-              if (sid.isNotBlank()) put("short_id", sid)
-            })
-          })
-        }
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Ошибка парсинга VLESS: ${e.message}")
-      null
-    }
-  }
-
-  private fun downloadUrl(urlString: String): String {
-    var curUrl = urlString
-    for (redirect in 0 until 5) {
-      val conn = (URL(curUrl).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 8000
-        readTimeout = 8000
-        instanceFollowRedirects = true
-        setRequestProperty("User-Agent", "v2rayNG/1.8.5")
-      }
-      val code = conn.responseCode
-      if (code == HttpURLConnection.HTTP_MOVED_PERM ||
-        code == HttpURLConnection.HTTP_MOVED_TEMP ||
-        code == 307 || code == 308
-      ) {
-        val loc = conn.getHeaderField("Location") ?: break
-        curUrl = loc
-        continue
-      }
-      if (code in 200..299) {
-        return conn.inputStream.bufferedReader().use { it.readText() }
-      }
-      break
-    }
-    throw IllegalStateException("Ошибка ответа сети: $urlString")
-  }
-
-  private fun showToast(context: Context, msg: String) {
-    Handler(Looper.getMainLooper()).post {
-      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-    }
-  }
-}
