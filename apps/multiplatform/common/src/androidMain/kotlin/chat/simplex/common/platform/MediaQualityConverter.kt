@@ -4,9 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
-import android.net.Uri
-import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
@@ -18,7 +17,7 @@ enum class PhotoQualityMode {
 }
 
 enum class VideoQualityMode {
-  FHD,     // 1080p max constraint (1920x1080 or 1080x1920)
+  FHD,     // 1080p max constraint
   FULL_RES // Full original resolution
 }
 
@@ -27,9 +26,6 @@ object MediaQualityConverter {
   private const val FOUR_MEGAPIXELS = 4_000_000L
   private const val FHD_MAX_SIDE = 1920
 
-  /**
-   * Конвертация фото согласно выбранному режиму (HD 4MP или UHD оригинал)
-   */
   fun processPhoto(
     context: Context,
     inputFile: File,
@@ -37,11 +33,9 @@ object MediaQualityConverter {
     outputFile: File
   ): File {
     if (qualityMode == PhotoQualityMode.UHD) {
-      // Для UHD оставляем полное разрешение (копируем или пережимаем с максимальным качеством)
       return inputFile
     }
 
-    // Режим HD: вычисляем размеры для ограничения в 4MP
     val boundsOptions = BitmapFactory.Options().apply {
       inJustDecodeBounds = true
     }
@@ -51,17 +45,14 @@ object MediaQualityConverter {
     val srcHeight = boundsOptions.outHeight
     val totalPixels = srcWidth.toLong() * srcHeight.toLong()
 
-    // Если фото уже меньше или равно 4MP — ничего не уменьшаем
     if (totalPixels <= FOUR_MEGAPIXELS) {
       return inputFile
     }
 
-    // Вычисляем масштаб для уменьшения строго до 4 MP
     val scaleFactor = sqrt(FOUR_MEGAPIXELS.toDouble() / totalPixels.toDouble())
     val targetWidth = (srcWidth * scaleFactor).roundToInt()
     val targetHeight = (srcHeight * scaleFactor).roundToInt()
 
-    // Загружаем Bitmap с оптимизацией памяти
     val decodeOptions = BitmapFactory.Options().apply {
       inSampleSize = calculateInSampleSize(srcWidth, srcHeight, targetWidth, targetHeight)
       inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -70,7 +61,6 @@ object MediaQualityConverter {
     val decodedBitmap = BitmapFactory.decodeFile(inputFile.absolutePath, decodeOptions) 
       ?: return inputFile
 
-    // Учитываем EXIF ориентацию
     val exifRotation = getExifRotation(inputFile)
     val matrix = Matrix().apply {
       if (exifRotation != 0f) postRotate(exifRotation)
@@ -94,9 +84,6 @@ object MediaQualityConverter {
     return outputFile
   }
 
-  /**
-   * Проверка и подготовка видео: проверяет разрешение через MetadataRetriever
-   */
   fun shouldDownscaleVideo(videoFile: File, mode: VideoQualityMode): Boolean {
     if (mode == VideoQualityMode.FULL_RES) return false
 
