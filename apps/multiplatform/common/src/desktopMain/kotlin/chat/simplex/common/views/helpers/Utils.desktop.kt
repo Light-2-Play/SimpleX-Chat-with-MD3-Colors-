@@ -37,6 +37,11 @@ private fun fontStyle(color: String) =
 
   actual fun processVideoIfNeeded(file: File): File = file
 
+actual fun saveImageFromUriPlatform(uri: URI): CryptoFile? {
+  val bitmap = getBitmapFromUri(uri) ?: return null
+  return saveImage(bitmap)
+}
+
 actual fun escapedHtmlToAnnotatedString(text: String, density: Density): AnnotatedString = try {
   buildAnnotatedString {
     fun String.substringSafe(start: Int, len: Int): String =
