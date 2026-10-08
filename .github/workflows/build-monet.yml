@@ -19,6 +19,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
       - name: Accept Android SDK Licenses
         run: yes | sdkmanager --licenses || true
 
@@ -118,13 +123,53 @@ jobs:
           cp byedpi-src/app/src/main/cpp/byedpi/libciadpi.so apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libciadpi.so
           rm -rf byedpi-src
 
-      - name: Download sing-box core for Android
+      # Скачиваем или компилируем ядро Sing-Box с поддержкой AmneziaWG (AWG)
+      - name: Build Sing-Box Core with AmneziaWG (AWG) for arm64
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apps/multiplatform/android/src/main/jniLibs/arm64-v8a
-          curl -Lo singbox.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-android-arm64.tar.gz
-          tar -xzf singbox.tar.gz
-          cp sing-box-*/sing-box apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libsingbox.so
-          chmod +x apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libsingbox.so
+          TARGET_SO="$GITHUB_WORKSPACE/apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libsingbox.so"
+          INSTALLED=false
+
+          echo "Проверка наличия готовых сборок с AmneziaWG..."
+          for REPO in "Asterisk4PT/sing-box" "deathline94/sing-box"; do
+            rm -rf /tmp/singbox_dl && mkdir -p /tmp/singbox_dl
+            if gh release download --repo "$REPO" --pattern "*android-arm64*" --dir /tmp/singbox_dl --clobber 2>/dev/null; then
+              for archive in /tmp/singbox_dl/*; do
+                if [[ "$archive" == *.tar.gz ]]; then
+                  tar -xzf "$archive" -C /tmp/singbox_dl
+                elif [[ "$archive" == *.zip ]]; then
+                  unzip -qo "$archive" -d /tmp/singbox_dl
+                fi
+              done
+              BIN=$(find /tmp/singbox_dl -name "sing-box" -type f | head -n 1)
+              if [ -n "$BIN" ]; then
+                cp "$BIN" "$TARGET_SO"
+                chmod +x "$TARGET_SO"
+                echo "Успешно установлено готовое AWG ядро из $REPO"
+                INSTALLED=true
+                break
+              fi
+            fi
+          done
+
+          if [ "$INSTALLED" = false ]; then
+            echo "Сборка ядра с AmneziaWG из исходного кода..."
+            rm -rf /tmp/singbox-src
+            git clone --depth 1 https://github.com/Asterisk4PT/sing-box.git /tmp/singbox-src || \
+            git clone --depth 1 https://github.com/deathline94/sing-box.git /tmp/singbox-src
+
+            cd /tmp/singbox-src
+            CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -v -trimpath -ldflags "-s -w -buildid=" -tags "with_wireguard,with_reality,with_quic" ./cmd/sing-box
+            
+            cd "$GITHUB_WORKSPACE"
+            cp /tmp/singbox-src/sing-box "$TARGET_SO"
+            chmod +x "$TARGET_SO"
+            echo "Ядро с поддержкой AWG успешно собрано"
+          fi
+
+          ls -lh "$TARGET_SO"
 
       - name: Build Debug APK
         run: |
