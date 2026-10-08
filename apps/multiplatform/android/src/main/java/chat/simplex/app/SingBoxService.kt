@@ -313,12 +313,9 @@ object SingBoxService {
       }
     } catch (_: Exception) {}
 
-    // 1. Amnezia vpn:// URI
+    // 1. Amnezia vpn:// URI (v2.0, v3.0, v3.1, Amnezia Free)
     if (input.startsWith("vpn://", ignoreCase = true)) {
-      val extractedConf = decodeAmneziaVpnUri(input)
-      if (!extractedConf.isNullOrBlank()) {
-        parseAwgConf(extractedConf, "amnezia-free")?.let { return it }
-      }
+      parseAmneziaVpn(input)?.let { return it }
     }
 
     // 2. HTTP subscription
@@ -345,14 +342,33 @@ object SingBoxService {
       parseVlessUri(vlessLine)?.let { return it }
     }
 
-    // 4. AmneziaWG 2.0 / 3.0 / 3.1 (.conf or awg://)
+    // 4. AmneziaWG (.conf or awg://)
     parseAwg(content)?.let { return it }
 
     return parseVlessUri(content)
   }
 
   /**
-   * Universal decoder for Amnezia vpn:// URI (v2.0, v3.0, v3.1, Amnezia Free)
+   * Dedicated entry point for Amnezia vpn:// parsing
+   */
+  private fun parseAmneziaVpn(vpnUri: String): JSONObject? {
+    val decodedText = decodeAmneziaVpnUri(vpnUri) ?: return null
+
+    // Case A: Unpacked content is classic [Interface] INI configuration
+    if (decodedText.contains("[Interface]", ignoreCase = true) && !decodedText.trim().startsWith("{")) {
+      return parseAwgConf(decodedText, "amnezia-free")
+    }
+
+    // Case B: Unpacked content is JSON structure
+    if (decodedText.trim().startsWith("{") || decodedText.trim().startsWith("[")) {
+      return parseAmneziaJsonToOutbound(decodedText)
+    }
+
+    return null
+  }
+
+  /**
+   * Decompresses Amnezia vpn:// payload (qCompress / zlib / deflate / gzip)
    */
   private fun decodeAmneziaVpnUri(vpnUri: String): String? {
     return try {
@@ -366,42 +382,14 @@ object SingBoxService {
       }
       raw = raw.replace("\\s".toRegex(), "")
 
-      val mod = raw.length % 4
+      var cleanB64 = raw.replace('-', '+').replace('_', '/')
+      val mod = cleanB64.length % 4
       if (mod != 0) {
-        raw += "=".repeat(4 - mod)
+        cleanB64 += "=".repeat(4 - mod)
       }
 
-      val rawBytes = try {
-        Base64.decode(raw, Base64.DEFAULT)
-      } catch (_: Exception) {
-        Base64.decode(raw, Base64.URL_SAFE)
-      }
-
-      val decompressed = decompressPayload(rawBytes) ?: return null
-
-      if (decompressed.contains("[Interface]", ignoreCase = true) && !decompressed.trim().startsWith("{")) {
-        return decompressed
-      }
-
-      if (decompressed.trim().startsWith("{") || decompressed.trim().startsWith("[")) {
-        val root: Any? = try {
-          JSONObject(decompressed)
-        } catch (_: Exception) {
-          try {
-            JSONArray(decompressed)
-          } catch (_: Exception) {
-            null
-          }
-        }
-        if (root != null) {
-          val extracted = findConfigInJson(root)
-          if (!extracted.isNullOrBlank()) {
-            return extracted
-          }
-        }
-      }
-
-      null
+      val rawBytes = Base64.decode(cleanB64, Base64.DEFAULT)
+      decompressPayload(rawBytes)
     } catch (e: Exception) {
       Log.e(TAG, "Failed to decode vpn:// URI: ${e.message}")
       null
@@ -409,37 +397,39 @@ object SingBoxService {
   }
 
   private fun decompressPayload(bytes: ByteArray): String? {
-    val directText = String(bytes, Charsets.UTF_8).trim()
-    if (directText.startsWith("{") || directText.contains("[Interface]")) {
+    val directText = try { String(bytes, Charsets.UTF_8).trim() } catch (_: Exception) { "" }
+    if (directText.startsWith("{") || directText.contains("[Interface]") || directText.startsWith("[")) {
       return directText
     }
 
-    // Qt qCompress (offset 4) and zlib (offset 0)
+    // 1. Qt qCompress (offset 4) and zlib (offset 0), testing both RFC 1950 and raw deflate
     for (offset in listOf(4, 0)) {
       if (bytes.size <= offset) continue
-      try {
-        val inflater = Inflater()
-        inflater.setInput(bytes, offset, bytes.size - offset)
-        val bos = ByteArrayOutputStream()
-        val buffer = ByteArray(4096)
-        while (!inflater.finished()) {
-          val count = inflater.inflate(buffer)
-          if (count <= 0 && inflater.needsInput()) break
-          bos.write(buffer, 0, count)
-        }
-        inflater.end()
-        val res = bos.toString("UTF-8").trim()
-        if (res.startsWith("{") || res.contains("[Interface]")) {
-          return res
-        }
-      } catch (_: Exception) {}
+      for (nowrap in listOf(false, true)) {
+        try {
+          val inflater = Inflater(nowrap)
+          inflater.setInput(bytes, offset, bytes.size - offset)
+          val bos = ByteArrayOutputStream()
+          val buffer = ByteArray(4096)
+          while (!inflater.finished()) {
+            val count = inflater.inflate(buffer)
+            if (count <= 0 && inflater.needsInput()) break
+            bos.write(buffer, 0, count)
+          }
+          inflater.end()
+          val res = bos.toString("UTF-8").trim()
+          if (res.startsWith("{") || res.contains("[Interface]") || res.startsWith("[")) {
+            return res
+          }
+        } catch (_: Exception) {}
+      }
     }
 
-    // GZIP
+    // 2. GZIP
     try {
       val gis = GZIPInputStream(bytes.inputStream())
       val res = gis.bufferedReader(Charsets.UTF_8).readText().trim()
-      if (res.startsWith("{") || res.contains("[Interface]")) {
+      if (res.startsWith("{") || res.contains("[Interface]") || res.startsWith("[")) {
         return res
       }
     } catch (_: Exception) {}
@@ -448,55 +438,184 @@ object SingBoxService {
   }
 
   /**
-   * Recursive config finder inside arbitrary JSON payloads
+   * Converts structured Amnezia JSON into a SingBox WireGuard outbound
    */
-  private fun findConfigInJson(node: Any): String? {
-    when (node) {
-      is String -> {
-        val trimmed = node.trim()
-        if (trimmed.contains("[Interface]", ignoreCase = true)) {
-          return if (trimmed.startsWith("{")) {
-            try {
-              findConfigInJson(JSONObject(trimmed)) ?: trimmed
-            } catch (_: Exception) {
-              trimmed
-            }
-          } else {
-            trimmed
+  private fun parseAmneziaJsonToOutbound(jsonStr: String): JSONObject? {
+    try {
+      val root = JSONObject(jsonStr)
+      val defaultContainer = root.optString("defaultContainer", "")
+      val hostName = root.optString("hostName").ifBlank {
+        root.optString("ip").ifBlank { root.optString("server") }
+      }
+
+      var targetContainerObj: JSONObject? = null
+
+      val containers = root.optJSONArray("containers")
+      if (containers != null) {
+        for (i in 0 until containers.length()) {
+          val c = containers.optJSONObject(i) ?: continue
+          val cName = c.optString("container", "").lowercase()
+          if (cName.contains("awg") || cName.contains("wireguard") || cName == defaultContainer.lowercase()) {
+            targetContainerObj = c
+            break
           }
         }
-        if (trimmed.length > 24 && !trimmed.contains(" ")) {
-          try {
-            val decoded = String(Base64.decode(trimmed, Base64.DEFAULT), Charsets.UTF_8)
-            if (decoded.contains("[Interface]", ignoreCase = true)) {
-              return decoded
+        if (targetContainerObj == null && containers.length() > 0) {
+          targetContainerObj = containers.optJSONObject(0)
+        }
+      }
+
+      val containerObj = targetContainerObj ?: root
+      val subObj = containerObj.optJSONObject("awg")
+        ?: containerObj.optJSONObject("amnezia-awg")
+        ?: containerObj.optJSONObject("wireguard")
+        ?: containerObj
+
+      val lastConfig = subObj.optString("last_config", "")
+      if (lastConfig.isNotBlank()) {
+        if (lastConfig.contains("[Interface]", ignoreCase = true)) {
+          val conf = if (lastConfig.trim().startsWith("{")) {
+            try { JSONObject(lastConfig).optString("config") } catch (_: Exception) { lastConfig }
+          } else lastConfig
+          val ob = parseAwgConf(conf, "amnezia-free")
+          if (ob != null) {
+            if (ob.optString("server").isBlank() && hostName.isNotBlank()) {
+              ob.put("server", hostName)
             }
+            return ob
+          }
+        }
+        if (lastConfig.trim().startsWith("{")) {
+          try {
+            val innerObj = JSONObject(lastConfig)
+            val innerOb = buildWireguardOutboundFromJson(innerObj, hostName)
+            if (innerOb != null) return innerOb
           } catch (_: Exception) {}
         }
       }
-      is JSONObject -> {
-        val priorityKeys = listOf("last_config", "config", "client_config", "awg", "amnezia-awg", "wireguard", "containers")
-        for (k in priorityKeys) {
-          if (node.has(k)) {
-            val res = findConfigInJson(node.get(k))
-            if (!res.isNullOrBlank()) return res
+
+      return buildWireguardOutboundFromJson(subObj, hostName)
+    } catch (e: Exception) {
+      Log.e(TAG, "Error parsing Amnezia JSON: ${e.message}")
+    }
+    return null
+  }
+
+  private fun buildWireguardOutboundFromJson(cfg: JSONObject, defaultHost: String): JSONObject? {
+    try {
+      val privateKey = cfg.optString("client_priv_key")
+        .ifBlank { cfg.optString("private_key") }
+        .ifBlank { cfg.optString("priv_key") }
+        .ifBlank { cfg.optString("privatekey") }
+
+      val peerPublicKey = cfg.optString("server_pub_key")
+        .ifBlank { cfg.optString("public_key") }
+        .ifBlank { cfg.optString("pub_key") }
+        .ifBlank { cfg.optString("publickey") }
+
+      var server = cfg.optString("hostName")
+        .ifBlank { cfg.optString("server") }
+        .ifBlank { defaultHost }
+
+      if (server.isBlank() && cfg.has("endpoint")) {
+        server = cfg.optString("endpoint").substringBefore(":")
+      }
+
+      var serverPort = cfg.optInt("port", 0)
+      if (serverPort <= 0) serverPort = cfg.optString("port").toIntOrNull() ?: 0
+      if (serverPort <= 0 && cfg.has("endpoint") && cfg.optString("endpoint").contains(":")) {
+        serverPort = cfg.optString("endpoint").substringAfter(":").toIntOrNull() ?: 0
+      }
+      if (serverPort <= 0) serverPort = 51820
+
+      if (privateKey.isBlank() || peerPublicKey.isBlank() || server.isBlank()) {
+        return null
+      }
+
+      val addrRaw = cfg.optString("client_ip")
+        .ifBlank { cfg.optString("address") }
+        .ifBlank { cfg.optString("ip") }
+        .ifBlank { "10.8.0.2/32" }
+
+      val localAddresses = JSONArray().apply {
+        addrRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { addr ->
+          val formatted = if (!addr.contains("/")) {
+            if (addr.contains(":")) "$addr/128" else "$addr/32"
+          } else {
+            addr
           }
-        }
-        val keys = node.keys()
-        while (keys.hasNext()) {
-          val k = keys.next()
-          if (k !in priorityKeys) {
-            val res = findConfigInJson(node.get(k))
-            if (!res.isNullOrBlank()) return res
-          }
+          put(formatted)
         }
       }
-      is JSONArray -> {
-        for (i in 0 until node.length()) {
-          val res = findConfigInJson(node.get(i))
-          if (!res.isNullOrBlank()) return res
+
+      fun getIntParam(vararg keys: String): Int? {
+        for (k in keys) {
+          if (cfg.has(k)) {
+            val v = cfg.optInt(k, -1)
+            if (v >= 0) return v
+            val sv = cfg.optString(k).toIntOrNull()
+            if (sv != null && sv >= 0) return sv
+          }
         }
+        return null
       }
+
+      fun getMagicParam(vararg keys: String): Long? {
+        for (k in keys) {
+          if (cfg.has(k)) {
+            val optVal = cfg.opt(k)
+            if (optVal is Number) return optVal.toLong() and 0xFFFFFFFFL
+            val str = cfg.optString(k).trim()
+            if (str.isNotBlank()) {
+              return if (str.startsWith("0x", ignoreCase = true)) {
+                str.substring(2).toLongOrNull(16)
+              } else {
+                str.toLongOrNull()
+              }?.let { it and 0xFFFFFFFFL }
+            }
+          }
+        }
+        return null
+      }
+
+      val jc = getIntParam("Jc", "jc", "junk_packet_count")
+      val jmin = getIntParam("Jmin", "jmin", "junk_packet_min_size")
+      val jmax = getIntParam("Jmax", "jmax", "junk_packet_max_size")
+      val s1 = getIntParam("S1", "s1", "init_packet_junk_size")
+      val s2 = getIntParam("S2", "s2", "response_packet_junk_size")
+
+      val h1 = getMagicParam("H1", "h1", "init_packet_magic_header")
+      val h2 = getMagicParam("H2", "h2", "response_packet_magic_header")
+      val h3 = getMagicParam("H3", "h3", "underload_packet_magic_header")
+      val h4 = getMagicParam("H4", "h4", "transport_packet_magic_header")
+
+      val psk = cfg.optString("psk").ifBlank { cfg.optString("preshared_key") }
+      val mtu = cfg.optInt("mtu", 0).let { if (it > 0) it else cfg.optString("mtu").toIntOrNull() }
+
+      return JSONObject().apply {
+        put("type", "wireguard")
+        put("tag", "amnezia-free")
+        put("server", server)
+        put("server_port", serverPort)
+        put("local_address", localAddresses)
+        put("private_key", privateKey)
+        put("peer_public_key", peerPublicKey)
+
+        if (psk.isNotBlank()) put("pre_shared_key", psk)
+        if (mtu != null && mtu > 0) put("mtu", mtu)
+
+        if (jc != null) put("junk_packet_count", jc)
+        if (jmin != null) put("junk_packet_min_size", jmin)
+        if (jmax != null) put("junk_packet_max_size", jmax)
+        if (s1 != null) put("init_packet_junk_size", s1)
+        if (s2 != null) put("response_packet_junk_size", s2)
+        if (h1 != null) put("init_packet_magic_header", h1)
+        if (h2 != null) put("response_packet_magic_header", h2)
+        if (h3 != null) put("underload_packet_magic_header", h3)
+        if (h4 != null) put("transport_packet_magic_header", h4)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error building WireGuard outbound from JSON: ${e.message}")
     }
     return null
   }
@@ -504,7 +623,6 @@ object SingBoxService {
   private fun parseAwg(raw: String): JSONObject? {
     val trimmed = raw.trim()
 
-    // awg:// links
     if (trimmed.startsWith("awg://", ignoreCase = true)) {
       val tag = if (trimmed.contains("#")) trimmed.substringAfter("#") else "awg-proxy"
       val uriPart = trimmed.removePrefix("awg://").removePrefix("AWG://").substringBefore("#").trim()
