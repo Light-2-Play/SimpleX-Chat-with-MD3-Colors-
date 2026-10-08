@@ -145,7 +145,7 @@ object SingBoxService {
           showToast(context, "Прокси подключен ($LOCAL_PORT)")
         } else {
           val errorDetail = if (!proc.isAlive) {
-            "вылет (код ${proc.exitValue()}):$lastLog"
+            "вылет (код ${proc.exitValue()}): $lastLog"
           } else {
             "таймаут порта $LOCAL_PORT"
           }
@@ -226,7 +226,7 @@ object SingBoxService {
             break
           }
         } catch (e: Exception) {
-          Log.w(TAG, "Ошибка загрузки $url:${e.message}")
+          Log.w(TAG, "Ошибка загрузки $url: ${e.message}")
         }
       }
 
@@ -303,7 +303,6 @@ object SingBoxService {
   private fun resolveCustomOutbound(rawInput: String): JSONObject? {
     val input = rawInput.trim()
 
-    // 1. Если это URL — пробуем скачать
     val content = if (input.startsWith("http://", ignoreCase = true) || input.startsWith("https://", ignoreCase = true)) {
       try {
         val downloaded = downloadUrl(input)
@@ -321,16 +320,13 @@ object SingBoxService {
       input
     }
 
-    // 2. Проверяем наличие строки vless://
     val vlessLine = content.lines().firstOrNull { it.trim().startsWith("vless://", ignoreCase = true) }?.trim()
     if (vlessLine != null) {
       parseVlessUri(vlessLine)?.let { return it }
     }
 
-    // 3. Проверяем AmneziaWG (конфиг .conf или ссылка awg://)
     parseAwg(content)?.let { return it }
 
-    // 4. Если ничего не подошло, пробуем распарсить как прямую VLESS ссылку
     return parseVlessUri(content)
   }
 
@@ -340,13 +336,11 @@ object SingBoxService {
   private fun parseAwg(raw: String): JSONObject? {
     val trimmed = raw.trim()
 
-    // Формат ссылки awg://
     if (trimmed.startsWith("awg://", ignoreCase = true)) {
       val uriPart = trimmed.substring(6)
       val tag = if (trimmed.contains("#")) trimmed.substringAfter("#") else "awg-proxy"
       val beforeFragment = uriPart.substringBefore("#")
 
-      // Проверяем: не зашифрован ли внутри Base64 конфиг .conf
       try {
         val decoded = String(Base64.decode(beforeFragment, Base64.DEFAULT))
         if (decoded.contains("[Interface]", ignoreCase = true) || decoded.contains("PrivateKey", ignoreCase = true)) {
@@ -354,7 +348,6 @@ object SingBoxService {
         }
       } catch (_: Exception) {}
 
-      // Иначе разбираем как стандартный URI с query-параметрами
       try {
         val uri = Uri.parse(trimmed)
         val privateKey = uri.userInfo.orEmpty()
@@ -387,7 +380,6 @@ object SingBoxService {
             uri.getQueryParameter("psk")?.takeIf { it.isNotBlank() }?.let { put("pre_shared_key", it) }
             uri.getQueryParameter("mtu")?.toIntOrNull()?.let { put("mtu", it) }
 
-            // Параметры AmneziaWG
             (uri.getQueryParameter("jc") ?: uri.getQueryParameter("junk_packet_count"))?.toIntOrNull()?.let { put("junk_packet_count", it) }
             (uri.getQueryParameter("jmin") ?: uri.getQueryParameter("junk_packet_min_size"))?.toIntOrNull()?.let { put("junk_packet_min_size", it) }
             (uri.getQueryParameter("jmax") ?: uri.getQueryParameter("junk_packet_max_size"))?.toIntOrNull()?.let { put("junk_packet_max_size", it) }
@@ -404,7 +396,6 @@ object SingBoxService {
       }
     }
 
-    // Формат текстового .conf конфига
     if (trimmed.contains("[Interface]", ignoreCase = true) || trimmed.contains("[Peer]", ignoreCase = true)) {
       return parseAwgConf(trimmed, "awg-proxy")
     }
@@ -413,7 +404,7 @@ object SingBoxService {
   }
 
   /**
-   * Разбор классического текстового .conf конфига WireGuard / AmneziaWG
+   * Разбор текстового .conf конфига WireGuard / AmneziaWG
    */
   private fun parseAwgConf(confText: String, defaultTag: String): JSONObject? {
     try {
@@ -544,3 +535,59 @@ object SingBoxService {
       JSONObject().apply {
         put("type", "vless")
         put("tag", tag)
+        put("server", server)
+        put("server_port", port)
+        put("uuid", uuid)
+        if (!flow.isNullOrBlank()) put("flow", flow)
+
+        if (security.equals("reality", ignoreCase = true)) {
+          put("tls", JSONObject().apply {
+            put("enabled", true)
+            put("server_name", sni)
+            put("utls", JSONObject().put("enabled", true).put("fingerprint", fp))
+            put("reality", JSONObject().apply {
+              put("enabled", true)
+              if (pbk.isNotBlank()) put("public_key", pbk)
+              if (sid.isNotBlank()) put("short_id", sid)
+            })
+          })
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Ошибка парсинга VLESS: ${e.message}")
+      null
+    }
+  }
+
+  private fun downloadUrl(urlString: String): String {
+    var curUrl = urlString
+    for (redirect in 0 until 5) {
+      val conn = (URL(curUrl).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 8000
+        readTimeout = 8000
+        instanceFollowRedirects = true
+        setRequestProperty("User-Agent", "v2rayNG/1.8.5")
+      }
+      val code = conn.responseCode
+      if (code == HttpURLConnection.HTTP_MOVED_PERM ||
+        code == HttpURLConnection.HTTP_MOVED_TEMP ||
+        code == 307 || code == 308
+      ) {
+        val loc = conn.getHeaderField("Location") ?: break
+        curUrl = loc
+        continue
+      }
+      if (code in 200..299) {
+        return conn.inputStream.bufferedReader().use { it.readText() }
+      }
+      break
+    }
+    throw IllegalStateException("Ошибка ответа сети: $urlString")
+  }
+
+  private fun showToast(context: Context, msg: String) {
+    Handler(Looper.getMainLooper()).post {
+      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+  }
+}
