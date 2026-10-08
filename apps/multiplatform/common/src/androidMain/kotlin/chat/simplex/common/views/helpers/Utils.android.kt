@@ -107,12 +107,14 @@ actual fun escapedHtmlToAnnotatedString(text: String, density: Density): Annotat
 }
 
 actual fun processVideoIfNeeded(file: File): File {
-  // Возвращаем исходный файл без повреждения контейнера MP4.
-  // Полноценный ресайз видео на Android без сторонних библиотек требует 
-  // связки MediaCodec Decoder -> Surface -> MediaCodec Encoder.
-  return file
-}
-  // 2. Режим FHD — проверяем габариты видео
+  val qualityMode = MediaQualityManager.videoQualityState.value
+
+  // 1. В режиме FullRes видео отправляется оригинальным
+  if (qualityMode == VideoQuality.FULL_RES) {
+    return file
+  }
+
+  // 2. В режиме FHD проверяем исходное разрешение
   val retriever = MediaMetadataRetriever()
   val (width, height) = try {
     retriever.setDataSource(file.absolutePath)
@@ -120,20 +122,21 @@ actual fun processVideoIfNeeded(file: File): File {
     val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
     w to h
   } catch (e: Exception) {
-    Log.e(TAG, "processVideoIfNeeded retriever error: ${e.message}")
+    Log.e(TAG, "retriever error: ${e.message}")
     0 to 0
   } finally {
     retriever.release()
   }
 
-  // Если метаданные не прочитались или видео уже <= 1080p (FHD), транскодирование не требуется
   val maxSide = maxOf(width, height)
   val minSide = minOf(width, height)
+
+  // Если видео уже <= 1080p (обычные 1080p, 720p, вертикальные ролики), транскодирование не требуется
   if (maxSide == 0 || (maxSide <= 1920 && minSide <= 1080)) {
     return file
   }
 
-  // 3. Если видео больше 1080p (например, 4K) — пережимаем в FHD
+  // 3. Если видео больше 1080p (например, 4K) — сжимаем через MediaCodec
   return try {
     val fhdFile = File(file.parentFile, "fhd_${file.name}")
     val success = VideoTranscoder.transcodeTo1080p(file, fhdFile)
@@ -141,10 +144,10 @@ actual fun processVideoIfNeeded(file: File): File {
       ChatModel.filesToDelete.add(fhdFile)
       fhdFile
     } else {
-      file
+      file // Безопасный фоллбэк: если кодек не ответил, отдаем оригинал
     }
   } catch (e: Exception) {
-    Log.e(TAG, "Failed to downscale video to FHD: ${e.message}")
+    Log.e(TAG, "Video transcode failed: ${e.message}")
     file
   }
 }
