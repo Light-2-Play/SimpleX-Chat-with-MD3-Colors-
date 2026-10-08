@@ -99,41 +99,94 @@ actual class RecorderNative: RecorderInterface {
 }
 
 actual object AudioPlayer: AudioPlayerInterface {
+  private val audioManager = androidAppContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+  private var audioFocusRequest: AudioFocusRequest? = null
+
+  private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+    when (focusChange) {
+      AudioManager.AUDIOFOCUS_LOSS,
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+        // Если другое приложение или звонок перехватили звук — останавливаем войс
+        if (player.isPlaying) {
+          AudioPlayer.stop()
+        }
+      }
+    }
+  }
+
+  private fun requestAudioFocus() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val playbackAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
+      val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(playbackAttributes)
+        .setAcceptsDelayedFocusGain(false)
+        .setOnAudioFocusChangeListener(focusChangeListener)
+        .build()
+
+      audioFocusRequest = request
+      audioManager.requestAudioFocus(request)
+    } else {
+      @Suppress("DEPRECATION")
+      audioManager.requestAudioFocus(
+        focusChangeListener,
+        AudioManager.STREAM_MUSIC,
+        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+      )
+    }
+  }
+
+  private fun abandonAudioFocus() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      audioFocusRequest?.let {
+        audioManager.abandonAudioFocusRequest(it)
+        audioFocusRequest = null
+      }
+    } else {
+      @Suppress("DEPRECATION")
+      audioManager.abandonAudioFocus(focusChangeListener)
+    }
+  }
+
   private val player = MediaPlayer().apply {
+    setAudioAttributes(
+      AudioAttributes.Builder()
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .build()
+    )
+    audioManager.registerAudioPlaybackCallback(object: AudioPlaybackCallback() {
+      override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>?) {
+        if (configs?.any { it.audioAttributes.usage == AudioAttributes.USAGE_VOICE_COMMUNICATION } == true) {
+          // In a process of making a call
+          RecorderInterface.stopRecording?.invoke()
+          AudioPlayer.stop()
+        }
+        super.onPlaybackConfigChanged(configs)
+      }
+    }, null)
+  }
+
+  private val helperPlayer: MediaPlayer = MediaPlayer().apply {
     setAudioAttributes(
       AudioAttributes.Builder()
         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .build()
     )
-    (androidAppContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-      .registerAudioPlaybackCallback(object: AudioPlaybackCallback() {
-        override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>?) {
-          if (configs?.any { it.audioAttributes.usage == AudioAttributes.USAGE_VOICE_COMMUNICATION } == true) {
-            // In a process of making a call
-            RecorderInterface.stopRecording?.invoke()
-            AudioPlayer.stop()
-          }
-          super.onPlaybackConfigChanged(configs)
-        }
-      }, null)
   }
-  private val helperPlayer: MediaPlayer =  MediaPlayer().apply {
-        setAudioAttributes(
-          AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .build()
-        )
-  }
+
   override val currentlyPlaying: MutableState<CurrentlyPlayingState?> = mutableStateOf(null)
   private var progressJob: Job? = null
 
- override val playbackSpeed: MutableState<Float> = mutableStateOf(1.0f)
+  override val playbackSpeed: MutableState<Float> = mutableStateOf(1.0f)
 
   override fun setPlaybackSpeed(speed: Float) {
     playbackSpeed.value = speed
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       runCatching {
         val params = player.playbackParams
         params.speed = speed
@@ -176,10 +229,13 @@ actual object AudioPlayer: AudioPlayerInterface {
       }
     }
     if (seek != null) player.seekTo(seek)
+
+    // Запрашиваем временный аудиофокус перед воспроизведением (ставит внешнюю музыку на паузу)
+    requestAudioFocus()
     player.start()
 
     // Применяем сохранённую скорость к начавшемуся треку
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && playbackSpeed.value != 1.0f) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && playbackSpeed.value != 1.0f) {
       runCatching {
         val params = player.playbackParams
         params.speed = playbackSpeed.value
@@ -193,8 +249,6 @@ actual object AudioPlayer: AudioPlayerInterface {
       onProgressUpdate(player.currentPosition, TrackState.PLAYING)
       while(isActive && player.isPlaying) {
         keepScreenOn(true)
-        // Even when current position is equal to duration, the player has isPlaying == true for some time,
-        // so help to make the playback stopped in UI immediately
         if (player.currentPosition == player.duration) {
           onProgressUpdate(player.currentPosition, TrackState.PLAYING)
           break
@@ -202,14 +256,12 @@ actual object AudioPlayer: AudioPlayerInterface {
         delay(50)
         onProgressUpdate(player.currentPosition, TrackState.PLAYING)
       }
-      /*
-      * Since coroutine is still NOT canceled, means player ended (no stop/no pause). But in some cases
-      * the player can show position != duration even if they actually equal.
-      * Let's say to a listener that the position == duration in case of coroutine finished without cancel
-      * */
+
       if (isActive) {
         onProgressUpdate(player.duration, TrackState.PAUSED)
       }
+      // Освобождаем фокус при завершении трека, чтобы музыка возобновилась
+      abandonAudioFocus()
       keepScreenOn(false)
       onProgressUpdate(null, TrackState.PAUSED)
 
@@ -224,6 +276,8 @@ actual object AudioPlayer: AudioPlayerInterface {
     progressJob?.cancel()
     progressJob = null
     player.pause()
+    // Освобождаем фокус при паузе
+    abandonAudioFocus()
     keepScreenOn(false)
     return player.currentPosition
   }
@@ -231,13 +285,14 @@ actual object AudioPlayer: AudioPlayerInterface {
   override fun stop() {
     if (currentlyPlaying.value == null) return
     player.stop()
+    // Освобождаем фокус при остановке
+    abandonAudioFocus()
     stopListener()
     keepScreenOn(false)
   }
 
   override fun stop(item: ChatItem) = stop(item.file?.fileName)
 
-  // FileName or filePath are ok
   override fun stop(fileName: String?) {
     if (fileName != null && currentlyPlaying.value?.fileSource?.filePath?.endsWith(fileName) == true) {
       stop()
@@ -246,13 +301,9 @@ actual object AudioPlayer: AudioPlayerInterface {
 
   private fun stopListener() {
     val afterCoroutineCancel: CompletionHandler = {
-      // Notify prev audio listener about stop
       currentlyPlaying.value?.onProgressUpdate?.invoke(null, TrackState.REPLACED)
       currentlyPlaying.value = null
     }
-    /** Preventing race by calling a code AFTER coroutine ends, so [TrackState] will be:
-     * [TrackState.PLAYING] -> [TrackState.PAUSED] -> [TrackState.REPLACED] (in this order)
-     * */
     if (progressJob != null) {
       progressJob?.invokeOnCompletion(afterCoroutineCancel)
     } else {
@@ -287,7 +338,6 @@ actual object AudioPlayer: AudioPlayerInterface {
       }
     }
     audioPlaying.value = realDuration != null
-    // Update to real duration instead of what was received in ChatInfo
     realDuration?.let { duration.value = it }
   }
 
