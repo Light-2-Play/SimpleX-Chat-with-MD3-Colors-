@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
@@ -55,6 +54,33 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.seconds
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+// Векторная иконка щита Material 3 (кэшируется в памяти)
+val ShieldIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        name = "Shield",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(fill = SolidColor(Color.White)) {
+            moveTo(12f, 1f)
+            lineTo(3f, 5f)
+            verticalLineToRelative(6f)
+            curveToRelative(0f, 5.55f, 3.84f, 10.74f, 9f, 12f)
+            curveToRelative(5.16f, -1.26f, 9f, -6.45f, 9f, -12f)
+            verticalLineTo(5f)
+            lineToRelative(-9f, -4f)
+            close()
+        }
+    }.build()
+}
 
 // Мост для вызова Android-диалога из кроссплатформенного Compose
 object ByeDpiBridge {
@@ -637,7 +663,7 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
         }
       ) {
         Icon(
-          imageVector = Icons.Default.Lock,
+          imageVector = ShieldIcon,
           contentDescription = "ByeDPI Presets",
           tint = MaterialTheme.colors.onBackground
         )
