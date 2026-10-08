@@ -48,42 +48,43 @@ actual fun MediaQualityButton(
     if (isHighQuality) "UHD" else "HD"
   }
 
-  val isDark = !MaterialTheme.colors.isLight
+  val themeColors = MaterialTheme.colors
+  val isDark = !themeColors.isLight
 
   // Привязка к системной палитре Monet (Android 12+) с фоллбэком на палитру темы
-  val monetPrimaryContainer = remember(isDark) {
+  val monetPrimaryContainer = remember(isDark, themeColors) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       val resId = if (isDark) android.R.color.system_accent1_700 else android.R.color.system_accent1_100
       Color(ContextCompat.getColor(context, resId))
     } else {
-      MaterialTheme.colors.primary.copy(alpha = if (isDark) 0.35f else 0.22f)
+      themeColors.primary.copy(alpha = if (isDark) 0.35f else 0.22f)
     }
   }
 
-  val monetOnPrimaryContainer = remember(isDark) {
+  val monetOnPrimaryContainer = remember(isDark, themeColors) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       val resId = if (isDark) android.R.color.system_accent1_100 else android.R.color.system_accent1_900
       Color(ContextCompat.getColor(context, resId))
     } else {
-      MaterialTheme.colors.primary
+      themeColors.primary
     }
   }
 
-  val monetSecondaryContainer = remember(isDark) {
+  val monetSecondaryContainer = remember(isDark, themeColors) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       val resId = if (isDark) android.R.color.system_accent2_800 else android.R.color.system_accent2_100
       Color(ContextCompat.getColor(context, resId)).copy(alpha = 0.8f)
     } else {
-      MaterialTheme.colors.onSurface.copy(alpha = if (isDark) 0.15f else 0.08f)
+      themeColors.onSurface.copy(alpha = if (isDark) 0.15f else 0.08f)
     }
   }
 
-  val monetOnSecondaryContainer = remember(isDark) {
+  val monetOnSecondaryContainer = remember(isDark, themeColors) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       val resId = if (isDark) android.R.color.system_accent2_100 else android.R.color.system_accent2_900
       Color(ContextCompat.getColor(context, resId))
     } else {
-      MaterialTheme.colors.onSurface.copy(alpha = 0.85f)
+      themeColors.onSurface.copy(alpha = 0.85f)
     }
   }
 
