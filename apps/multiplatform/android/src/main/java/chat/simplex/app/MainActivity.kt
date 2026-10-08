@@ -487,7 +487,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... or https://...", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
+                        placeholder = { Text("vless://..., awg://... or [Interface]", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             textColor = monet.onSurface,
                             placeholderColor = monet.onSurfaceVariant.copy(alpha = 0.6f),
