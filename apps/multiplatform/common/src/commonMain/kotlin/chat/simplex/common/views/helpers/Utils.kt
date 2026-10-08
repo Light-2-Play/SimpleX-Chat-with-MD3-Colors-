@@ -261,23 +261,32 @@ fun saveFileFromUri(
     val encrypted = chatController.appPrefs.privacyEncryptLocalFiles.get()
     val inputStream = uri.inputStream()
     val fileToSave = getFileName(uri)
-    return if (inputStream != null && fileToSave != null) {
+
+    if (inputStream != null && fileToSave != null) {
       val destFileName = if (hiddenFileNamePrefix == null) {
         uniqueCombine(fileToSave, File(getAppFilePath("")))
       } else {
         val ext = when {
-          // remove everything but extension
           fileToSave.contains(".") -> fileToSave.substringAfterLast(".")
           else -> null
         }
         generateNewFileName(hiddenFileNamePrefix, ext, File(getAppFilePath("")))
       }
       val destFile = File(getAppFilePath(destFileName))
+
       if (encrypted) {
         createTmpFileAndDelete { tmpFile ->
           copyInputStreamToFile(inputStream, tmpFile, maxBytes)
+
+          // Перехват: если это видео, применяем выбранный режим качества
+          val finalFile = if (hiddenFileNamePrefix == "video") {
+            processVideoIfNeeded(tmpFile)
+          } else {
+            tmpFile
+          }
+
           try {
-            val args = encryptCryptoFile(tmpFile.absolutePath, destFile.absolutePath)
+            val args = encryptCryptoFile(finalFile.absolutePath, destFile.absolutePath)
             CryptoFile(destFileName, args)
           } catch (e: Exception) {
             Log.e(TAG, "Unable to encrypt plain file: " + e.stackTraceToString())
@@ -286,13 +295,21 @@ fun saveFileFromUri(
           }
         }
       } else {
-        copyInputStreamToFile(inputStream, destFile, maxBytes)
-        CryptoFile.plain(destFileName)
+        if (hiddenFileNamePrefix == "video") {
+          createTmpFileAndDelete { tmpFile ->
+            copyInputStreamToFile(inputStream, tmpFile, maxBytes)
+            val finalFile = processVideoIfNeeded(tmpFile)
+            finalFile.copyTo(destFile, overwrite = true)
+            CryptoFile.plain(destFileName)
+          }
+        } else {
+          copyInputStreamToFile(inputStream, destFile, maxBytes)
+          CryptoFile.plain(destFileName)
+        }
       }
     } else {
       Log.e(TAG, "Util.kt saveFileFromUri null inputStream")
       if (withAlertOnException) showWrongUriAlert()
-
       null
     }
   } catch (e: FileTooLargeException) {
@@ -307,7 +324,6 @@ fun saveFileFromUri(
   } catch (e: Exception) {
     Log.e(TAG, "Util.kt saveFileFromUri error: ${e.stackTraceToString()}")
     if (withAlertOnException) showWrongUriAlert()
-
     null
   }
 }
@@ -494,6 +510,8 @@ fun ciSenderProfile(ci: ChatItem, chatInfo: ChatInfo): LocalProfile? = when (val
 }
 
 expect suspend fun getBitmapFromVideo(uri: URI, timestamp: Long? = null, random: Boolean = true, withAlertOnException: Boolean = true): VideoPlayerInterface.PreviewAndDuration
+
+expect fun processVideoIfNeeded(file: File): File
 
 // Whether the file really contains a video track. Reads container metadata only, without decoding a frame.
 expect suspend fun hasVideoTrack(uri: URI): Boolean
