@@ -35,6 +35,8 @@ private const val MAX_DECODED_PIXELS = MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION
 private fun fontStyle(color: String) =
   SpanStyle(color = Color(color.replace("#", "ff").toLongOrNull(16) ?: Color.White.toArgb().toLong()))
 
+  actual fun processVideoIfNeeded(file: File): File = file
+
 actual fun escapedHtmlToAnnotatedString(text: String, density: Density): AnnotatedString = try {
   buildAnnotatedString {
     fun String.substringSafe(start: Int, len: Int): String =
