@@ -5,22 +5,36 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.*
-import androidx.compose.runtime.*
+import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
+import androidx.compose.material.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import chat.simplex.common.model.ComposePreview
+import chat.simplex.common.ui.theme.DEFAULT_PADDING_HALF
+import chat.simplex.common.ui.theme.appColors
+import chat.simplex.common.views.helpers.UploadContent
+import chat.simplex.common.views.helpers.base64ToBitmap
+import chat.simplex.res.MR
 import dev.icerock.moko.resources.compose.painterResource
 import dev.icerock.moko.resources.compose.stringResource
-import androidx.compose.ui.unit.dp
-import chat.simplex.common.platform.base64ToBitmap
-import chat.simplex.res.MR
-import chat.simplex.common.ui.theme.*
-import chat.simplex.common.views.helpers.UploadContent
+
+// Мультиплатформенный контракт для кнопки качества
+@Composable
+expect fun MediaQualityButton(
+  isVideo: Boolean = false,
+  modifier: Modifier = Modifier
+)
 
 @Composable
 fun ComposeImageView(media: ComposePreview.MediaPreview, cancelImages: () -> Unit, cancelEnabled: Boolean) {
   val sentColor = MaterialTheme.appColors.sentMessage
+  val isVideo = remember(media) { media.content.any { it is UploadContent.Video } }
+
   Row(
     Modifier
       .padding(top = 8.dp)
@@ -28,7 +42,9 @@ fun ComposeImageView(media: ComposePreview.MediaPreview, cancelImages: () -> Uni
     verticalAlignment = Alignment.CenterVertically,
   ) {
     LazyRow(
-      Modifier.weight(1f).padding(start = DEFAULT_PADDING_HALF, end = if (cancelEnabled) 0.dp else DEFAULT_PADDING_HALF),
+      Modifier
+        .weight(1f)
+        .padding(start = DEFAULT_PADDING_HALF, end = if (cancelEnabled) 0.dp else DEFAULT_PADDING_HALF),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(DEFAULT_PADDING_HALF),
     ) {
@@ -45,8 +61,7 @@ fun ComposeImageView(media: ComposePreview.MediaPreview, cancelImages: () -> Uni
             Icon(
               painterResource(MR.images.ic_videocam_filled),
               "preview video",
-              Modifier
-                .size(20.dp),
+              Modifier.size(20.dp),
               tint = Color.White
             )
           }
@@ -60,12 +75,20 @@ fun ComposeImageView(media: ComposePreview.MediaPreview, cancelImages: () -> Uni
         }
       }
     }
+
+    // Кнопка выбора качества (HD/UHD для фото, FHD/FullRes для видео)
+    MediaQualityButton(
+      isVideo = isVideo,
+      modifier = Modifier.padding(horizontal = 6.dp)
+    )
+
     if (cancelEnabled) {
-      IconButton(onClick = cancelImages) {
+      IconButton(cancelImages) {
         Icon(
           painterResource(MR.images.ic_close),
-          contentDescription = stringResource(MR.strings.icon_descr_cancel_image_preview),
+          contentDescription = stringResource(MR.strings.cancel_verb),
           tint = MaterialTheme.colors.primary,
+          modifier = Modifier.padding(10.dp)
         )
       }
     }
