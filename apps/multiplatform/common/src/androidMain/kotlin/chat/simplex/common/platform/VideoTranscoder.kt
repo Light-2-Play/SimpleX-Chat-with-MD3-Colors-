@@ -7,13 +7,12 @@ import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 
 object VideoTranscoder {
 
   private const val TAG = "VideoTranscoder"
   private const val TIMEOUT_USEC = 10_000L
-  private const val TARGET_BITRATE = 6_000_000 // 6 Mbps для качественного FHD
+  private const val TARGET_BITRATE = 6_000_000 // 6 Mbps
 
   fun transcodeTo1080p(inputFile: File, outputFile: File): Boolean {
     val extractor = MediaExtractor()
@@ -24,6 +23,17 @@ object VideoTranscoder {
     var outputSurface: CodecOutputSurface? = null
 
     return try {
+      // 1. Считываем исходный угол поворота из метаданных ролика
+      val rotation = try {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(inputFile.absolutePath)
+        val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        retriever.release()
+        rot
+      } catch (_: Exception) {
+        0
+      }
+
       extractor.setDataSource(inputFile.absolutePath)
 
       var videoTrackIndex = -1
@@ -48,7 +58,7 @@ object VideoTranscoder {
       val srcWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
       val srcHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
 
-      // Рассчитываем пропорциональное сжатие до 1080p (кратно 2)
+      // Рассчитываем пропорциональное сжатие до 1080p
       val (targetWidth, targetHeight) = if (srcWidth >= srcHeight) {
         val scale = 1080f / srcHeight.toFloat()
         ((srcWidth * scale).toInt() and 1.inv()) to 1080
@@ -57,7 +67,6 @@ object VideoTranscoder {
         1080 to ((srcHeight * scale).toInt() and 1.inv())
       }
 
-      // 1. Конфигурируем энкодер H.264
       val outputVideoFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight).apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
         setInteger(MediaFormat.KEY_BIT_RATE, TARGET_BITRATE)
@@ -69,11 +78,9 @@ object VideoTranscoder {
         configure(outputVideoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
       }
 
-      // 2. Создаем EGL и Surface для связи Декодер -> Энкодер
       eglCore = EglCore(encoder.createInputSurface())
       outputSurface = CodecOutputSurface(targetWidth, targetHeight)
 
-      // 3. Конфигурируем декодер
       val videoMime = inputVideoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
       decoder = MediaCodec.createDecoderByType(videoMime).apply {
         configure(inputVideoFormat, outputSurface.surface, null, 0)
@@ -82,7 +89,13 @@ object VideoTranscoder {
       encoder.start()
       decoder.start()
 
-      muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+      muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+        // Переносим исходную ориентацию ролика в новый файл
+        if (rotation != 0) {
+          setOrientationHint(rotation)
+        }
+      }
+
       var muxerVideoTrack = -1
       var muxerAudioTrack = -1
       var muxerStarted = false
@@ -98,9 +111,7 @@ object VideoTranscoder {
       var sawOutputEOS = false
       var encoderDone = false
 
-      // 4. Основной конвейер кодирования видео
       while (!encoderDone) {
-        // Подаем данные в декодер
         if (!sawInputEOS) {
           val inIndex = decoder.dequeueInputBuffer(TIMEOUT_USEC)
           if (inIndex >= 0) {
@@ -119,7 +130,6 @@ object VideoTranscoder {
           }
         }
 
-        // Забираем кадры из декодера и отрисовываем на Surface энкодера
         if (!sawOutputEOS) {
           val outIndex = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC)
           if (outIndex >= 0) {
@@ -138,7 +148,6 @@ object VideoTranscoder {
           }
         }
 
-        // Забираем сжатые пакеты из энкодера и пишем в muxer
         while (true) {
           val encIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC)
           if (encIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -163,7 +172,7 @@ object VideoTranscoder {
         }
       }
 
-      // 5. Копируем аудиодорожку напрямую
+      // Перенос звуковой дорожки
       if (audioTrackIndex != -1 && muxerStarted) {
         extractor.unselectTrack(videoTrackIndex)
         extractor.selectTrack(audioTrackIndex)
@@ -199,7 +208,6 @@ object VideoTranscoder {
     }
   }
 
-  // Вспомогательный EGL контекст
   private class EglCore(surface: Any) {
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -229,6 +237,7 @@ object VideoTranscoder {
 
     fun setPresentationTime(nsecs: Long) = EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, nsecs)
     fun swapBuffers() = EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+
     fun release() {
       if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -239,7 +248,6 @@ object VideoTranscoder {
     }
   }
 
-  // Отрисовщик кадров через OpenGL
   private class CodecOutputSurface(private val width: Int, private val height: Int) : SurfaceTexture.OnFrameAvailableListener {
     private val surfaceTexture: SurfaceTexture
     val surface: android.view.Surface
@@ -247,6 +255,8 @@ object VideoTranscoder {
     private var frameAvailable = false
     private var program = 0
     private var texId = 0
+    private val transformMatrix = FloatArray(16)
+    private var uTexMatrixLoc = -1
 
     init {
       val textures = IntArray(1)
@@ -282,15 +292,38 @@ object VideoTranscoder {
     }
 
     fun drawImage() {
+      // Считываем системную матрицу трансформации каждого кадра (исправляет Y-flip)
+      surfaceTexture.getTransformMatrix(transformMatrix)
+
       GLES20.glViewport(0, 0, width, height)
       GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
       GLES20.glUseProgram(program)
+      GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, transformMatrix, 0)
       GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
     private fun initShader() {
-      val vShader = "attribute vec4 aPosition; attribute vec4 aTexCoord; varying vec2 vTexCoord; void main() { gl_Position = aPosition; vTexCoord = aTexCoord.xy; }"
-      val fShader = "#extension GL_OES_EGL_image_external : require\nprecision mediump float; varying vec2 vTexCoord; uniform samplerExternalOES sTexture; void main() { gl_FragColor = texture2D(sTexture, vTexCoord); }"
+      val vShader = """
+        attribute vec4 aPosition;
+        attribute vec4 aTexCoord;
+        uniform mat4 uTexMatrix;
+        varying vec2 vTexCoord;
+        void main() {
+          gl_Position = aPosition;
+          vTexCoord = (uTexMatrix * aTexCoord).xy;
+        }
+      """.trimIndent()
+
+      val fShader = """
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 vTexCoord;
+        uniform samplerExternalOES sTexture;
+        void main() {
+          gl_FragColor = texture2D(sTexture, vTexCoord);
+        }
+      """.trimIndent()
+
       val vs = loadShader(GLES20.GL_VERTEX_SHADER, vShader)
       val fs = loadShader(GLES20.GL_FRAGMENT_SHADER, fShader)
       program = GLES20.glCreateProgram().also {
@@ -298,6 +331,9 @@ object VideoTranscoder {
         GLES20.glAttachShader(it, fs)
         GLES20.glLinkProgram(it)
       }
+
+      uTexMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix")
+
       val quadData = floatArrayOf(
         -1.0f, -1.0f, 0f, 0f,
          1.0f, -1.0f, 1f, 0f,
