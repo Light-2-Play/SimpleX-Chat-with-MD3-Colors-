@@ -14,16 +14,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import chat.simplex.common.model.ComposePreview
+import chat.simplex.common.platform.base64ToBitmap
 import chat.simplex.common.ui.theme.DEFAULT_PADDING_HALF
 import chat.simplex.common.ui.theme.appColors
 import chat.simplex.common.views.helpers.UploadContent
-import chat.simplex.common.views.helpers.base64ToBitmap
 import chat.simplex.res.MR
 import dev.icerock.moko.resources.compose.painterResource
 import dev.icerock.moko.resources.compose.stringResource
 
-// Мультиплатформенный контракт для кнопки качества
 @Composable
 expect fun MediaQualityButton(
   isVideo: Boolean = false,
@@ -76,7 +74,6 @@ fun ComposeImageView(media: ComposePreview.MediaPreview, cancelImages: () -> Uni
       }
     }
 
-    // Кнопка выбора качества (HD/UHD для фото, FHD/FullRes для видео)
     MediaQualityButton(
       isVideo = isVideo,
       modifier = Modifier.padding(horizontal = 6.dp)
