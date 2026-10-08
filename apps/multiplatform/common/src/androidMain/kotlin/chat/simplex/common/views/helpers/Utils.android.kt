@@ -114,37 +114,45 @@ actual fun processVideoIfNeeded(file: File): File {
     return file
   }
 
-  // 2. В режиме FHD проверяем исходное разрешение
+  // 2. В режиме FHD проверяем видимое разрешение готового ролика
   val retriever = MediaMetadataRetriever()
-  val (width, height) = try {
+  val (width, height, rotation) = try {
     retriever.setDataSource(file.absolutePath)
     val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
     val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-    w to h
+    val r = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+    Triple(w, h, r)
   } catch (e: Exception) {
     Log.e(TAG, "retriever error: ${e.message}")
-    0 to 0
+    Triple(0, 0, 0)
   } finally {
     retriever.release()
   }
 
-  val maxSide = maxOf(width, height)
-  val minSide = minOf(width, height)
+  if (width == 0 || height == 0) return file
 
-  // Если видео уже <= 1080p (обычные 1080p, 720p, вертикальные ролики), транскодирование не требуется
-  if (maxSide == 0 || (maxSide <= 1920 && minSide <= 1080)) {
+  val visualWidth = if (rotation == 90 || rotation == 270) height else width
+  val visualHeight = if (rotation == 90 || rotation == 270) width else height
+
+  val isLandscape = visualWidth >= visualHeight
+  val maxLimit = if (isLandscape) 1920 else 1080
+  val minLimit = if (isLandscape) 1080 else 1920
+
+  // Если видео уже <= 1080p (вертикальное 1080x1920 или горизонтальное 1920x1080), сжимать не нужно
+  if (visualWidth <= maxLimit && visualHeight <= minLimit) {
     return file
   }
 
-  // 3. Если видео больше 1080p (например, 4K) — сжимаем через MediaCodec
+  // 3. Если больше (например, 4K) — уменьшаем до 1080p
   return try {
     val fhdFile = File(file.parentFile, "fhd_${file.name}")
+    if (fhdFile.exists()) fhdFile.delete()
     val success = VideoTranscoder.transcodeTo1080p(file, fhdFile)
     if (success && fhdFile.exists() && fhdFile.length() > 0) {
       ChatModel.filesToDelete.add(fhdFile)
       fhdFile
     } else {
-      file // Безопасный фоллбэк: если кодек не ответил, отдаем оригинал
+      file
     }
   } catch (e: Exception) {
     Log.e(TAG, "Video transcode failed: ${e.message}")
