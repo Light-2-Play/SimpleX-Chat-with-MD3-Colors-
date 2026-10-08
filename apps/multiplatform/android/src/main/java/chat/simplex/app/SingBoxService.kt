@@ -145,7 +145,7 @@ object SingBoxService {
           showToast(context, "Proxy connected ($LOCAL_PORT)")
         } else {
           val errorDetail = if (!proc.isAlive) {
-            "crashed (exit code ${proc.exitValue()}):$lastLog"
+            "crashed (exit code ${proc.exitValue()}): $lastLog"
           } else {
             "port $LOCAL_PORT timeout"
           }
@@ -221,7 +221,7 @@ object SingBoxService {
             break
           }
         } catch (e: Exception) {
-          Log.w(TAG, "Failed to download subscription from $url:${e.message}")
+          Log.w(TAG, "Failed to download subscription from $url: ${e.message}")
         }
       }
 
@@ -606,3 +606,56 @@ object SingBoxService {
         put("server", server)
         put("server_port", port)
         put("uuid", uuid)
+        if (!flow.isNullOrBlank()) put("flow", flow)
+
+        if (security.equals("reality", ignoreCase = true)) {
+          put("tls", JSONObject().apply {
+            put("enabled", true)
+            put("server_name", sni)
+            put("utls", JSONObject().put("enabled", true).put("fingerprint", fp))
+            put("reality", JSONObject().apply {
+              put("enabled", true)
+              if (pbk.isNotBlank()) put("public_key", pbk)
+              if (sid.isNotBlank()) put("short_id", sid)
+            })
+          })
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error parsing VLESS: ${e.message}")
+      null
+    }
+  }
+
+  private fun downloadUrl(urlString: String): String {
+    var curUrl = urlString
+    for (redirect in 0 until 5) {
+      val conn = (URL(curUrl).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 8000
+        readTimeout = 8000
+        instanceFollowRedirects = true
+        setRequestProperty("User-Agent", "v2rayNG/1.8.5")
+      }
+      val code = conn.responseCode
+      if (code == HttpURLConnection.HTTP_MOVED_PERM ||
+        code == HttpURLConnection.HTTP_MOVED_TEMP ||
+        code == 307 || code == 308
+      ) {
+        val loc = conn.getHeaderField("Location") ?: break
+        curUrl = loc
+        continue
+      }
+      if (code in 200..299) {
+        return conn.inputStream.bufferedReader().use { it.readText() }
+      }
+      break
+    }
+    throw IllegalStateException("Network response error: $urlString")
+  }
+
+  private fun showToast(context: Context, msg: String) {
+    Handler(Looper.getMainLooper()).post {
+      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+  }
+}
