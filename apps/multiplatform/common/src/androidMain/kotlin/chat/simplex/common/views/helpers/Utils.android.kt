@@ -337,10 +337,38 @@ actual suspend fun saveTempImageUncompressed(image: ImageBitmap, asPng: Boolean)
   return try {
     val ext = if (asPng) "png" else "jpg"
     tmpDir.mkdir()
+
+    val originalBitmap = image.asAndroidBitmap()
+    val photoMode = MediaQualityManager.photoQualityState.value
+
+    // Алгоритм HD (4MP) vs UHD (Оригинал)
+    val finalBitmap = if (!asPng && photoMode == PhotoQuality.HD) {
+      val srcWidth = originalBitmap.width
+      val srcHeight = originalBitmap.height
+      val totalPixels = srcWidth.toLong() * srcHeight.toLong()
+
+      if (totalPixels > PhotoQuality.HD.maxPixels) {
+        val scale = kotlin.math.sqrt(PhotoQuality.HD.maxPixels.toDouble() / totalPixels.toDouble())
+        val targetWidth = (srcWidth * scale).toInt()
+        val targetHeight = (srcHeight * scale).toInt()
+        Bitmap.createScaledBitmap(originalBitmap, targetWidth, targetHeight, true)
+      } else {
+        originalBitmap
+      }
+    } else {
+      originalBitmap
+    }
+
+    // UHD сохраняем с максимальным качеством 95%, HD — 88%
+    val quality = if (photoMode == PhotoQuality.UHD) 95 else 88
+
     return File(tmpDir.absolutePath + File.separator + generateNewFileName("IMG", ext, tmpDir)).apply {
       outputStream().use { out ->
-        image.asAndroidBitmap().compress(if (asPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 85, out)
+        finalBitmap.compress(if (asPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, quality, out)
         out.flush()
+      }
+      if (finalBitmap != originalBitmap && !finalBitmap.isRecycled) {
+        finalBitmap.recycle()
       }
       deleteOnExit()
       ChatModel.filesToDelete.add(this)
