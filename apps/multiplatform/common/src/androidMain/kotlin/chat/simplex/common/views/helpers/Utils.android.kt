@@ -59,6 +59,51 @@ actual fun escapedHtmlToAnnotatedString(text: String, density: Density): Annotat
   return spannableStringToAnnotatedString(HtmlCompat.fromHtml(text, HtmlCompat.FROM_HTML_MODE_LEGACY), density)
 }
 
+actual fun processVideoIfNeeded(file: File): File {
+  val qualityMode = MediaQualityManager.videoQualityState.value
+
+  // 1. Режим FullRes — отдаём оригинальный файл без изменений (стандартное поведение SimpleX)
+  if (qualityMode == VideoQuality.FULL_RES) {
+    return file
+  }
+
+  // 2. Режим FHD — проверяем габариты видео
+  val retriever = MediaMetadataRetriever()
+  val (width, height) = try {
+    retriever.setDataSource(file.absolutePath)
+    val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+    val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+    w to h
+  } catch (e: Exception) {
+    Log.e(TAG, "processVideoIfNeeded retriever error: ${e.message}")
+    0 to 0
+  } finally {
+    retriever.release()
+  }
+
+  // Если метаданные не прочитались или видео уже <= 1080p (FHD), транскодирование не требуется
+  val maxSide = maxOf(width, height)
+  val minSide = minOf(width, height)
+  if (maxSide == 0 || (maxSide <= 1920 && minSide <= 1080)) {
+    return file
+  }
+
+  // 3. Если видео больше 1080p (например, 4K) — пережимаем в FHD
+  return try {
+    val fhdFile = File(file.parentFile, "fhd_${file.name}")
+    val success = VideoTranscoder.transcodeTo1080p(file, fhdFile)
+    if (success && fhdFile.exists() && fhdFile.length() > 0) {
+      ChatModel.filesToDelete.add(fhdFile)
+      fhdFile
+    } else {
+      file
+    }
+  } catch (e: Exception) {
+    Log.e(TAG, "Failed to downscale video to FHD: ${e.message}")
+    file
+  }
+}
+
 private fun spannableStringToAnnotatedString(
   text: CharSequence,
   density: Density,
