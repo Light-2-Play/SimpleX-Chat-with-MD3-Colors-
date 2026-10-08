@@ -71,6 +71,8 @@ class MainActivity: FragmentActivity() {
       showSingBoxDialogState.value = true
     }
 
+    MediaQualityManager.init(applicationContext)
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       getMonetPalette = { isDark ->
         if (isDark) {
