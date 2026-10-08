@@ -27,9 +27,9 @@ import chat.simplex.common.platform.VideoQuality
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun MediaQualityButton(
-  isVideo: Boolean = false,
-  modifier: Modifier = Modifier
+actual fun MediaQualityButton(
+  isVideo: Boolean,
+  modifier: Modifier
 ) {
   val context = LocalContext.current
   val photoQuality by MediaQualityManager.photoQualityState
