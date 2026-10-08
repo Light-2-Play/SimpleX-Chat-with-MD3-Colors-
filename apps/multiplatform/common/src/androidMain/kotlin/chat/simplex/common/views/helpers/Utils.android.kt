@@ -60,13 +60,11 @@ actual fun escapedHtmlToAnnotatedString(text: String, density: Density): Annotat
 }
 
 actual fun processVideoIfNeeded(file: File): File {
-  val qualityMode = MediaQualityManager.videoQualityState.value
-
-  // 1. Режим FullRes — отдаём оригинальный файл без изменений (стандартное поведение SimpleX)
-  if (qualityMode == VideoQuality.FULL_RES) {
-    return file
-  }
-
+  // Возвращаем исходный файл без повреждения контейнера MP4.
+  // Полноценный ресайз видео на Android без сторонних библиотек требует 
+  // связки MediaCodec Decoder -> Surface -> MediaCodec Encoder.
+  return file
+}
   // 2. Режим FHD — проверяем габариты видео
   val retriever = MediaMetadataRetriever()
   val (width, height) = try {
