@@ -55,6 +55,53 @@ fun keepScreenOn(on: Boolean) {
   }
 }
 
+actual fun saveImageFromUriPlatform(uri: URI): CryptoFile? {
+  return try {
+    val quality = MediaQualityManager.photoQualityState.value
+    val encrypted = chatController.appPrefs.privacyEncryptLocalFiles.get()
+    val inputStream = uri.inputStream() ?: return null
+    val ext = getFileName(uri)?.substringAfterLast(".")?.lowercase() ?: "jpg"
+    val destFileName = generateNewFileName("IMG", if (ext == "png") "png" else "jpg", File(getAppFilePath("")))
+    val destFile = File(getAppFilePath(destFileName))
+
+    createTmpFileAndDelete { tmpFile ->
+      copyInputStreamToFile(inputStream, tmpFile, Long.MAX_VALUE)
+
+      // Если выбран HD — уменьшаем до 4MP. Если UHD — берем исходник без сжатия
+      val processedFile = if (quality == PhotoQuality.HD) {
+        val outFile = File(tmpFile.parentFile, "hd_${tmpFile.name}")
+        val result = MediaQualityConverter.processPhoto(
+          androidAppContext,
+          tmpFile,
+          PhotoQualityMode.HD,
+          outFile
+        )
+        ChatModel.filesToDelete.add(outFile)
+        result
+      } else {
+        tmpFile // UHD: отправляем оригинальный файл байт-в-байт
+      }
+
+      if (encrypted) {
+        try {
+          val args = encryptCryptoFile(processedFile.absolutePath, destFile.absolutePath)
+          CryptoFile(destFileName, args)
+        } catch (e: Exception) {
+          Log.e(TAG, "Unable to encrypt image: ${e.stackTraceToString()}")
+          AlertManager.shared.showAlertMsg(title = generalGetString(MR.strings.error), text = e.stackTraceToString())
+          null
+        }
+      } else {
+        processedFile.copyTo(destFile, overwrite = true)
+        CryptoFile.plain(destFileName)
+      }
+    }
+  } catch (e: Exception) {
+    Log.e(TAG, "saveImageFromUriPlatform error: ${e.stackTraceToString()}")
+    null
+  }
+}
+
 actual fun escapedHtmlToAnnotatedString(text: String, density: Density): AnnotatedString {
   return spannableStringToAnnotatedString(HtmlCompat.fromHtml(text, HtmlCompat.FROM_HTML_MODE_LEGACY), density)
 }
