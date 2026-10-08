@@ -1,5 +1,6 @@
 package chat.simplex.common.views.chat
 
+import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -8,9 +9,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.ripple.rememberRipple
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import chat.simplex.common.platform.MediaQualityManager
 import chat.simplex.common.platform.PhotoQuality
 import chat.simplex.common.platform.VideoQuality
@@ -47,26 +48,56 @@ actual fun MediaQualityButton(
     if (isHighQuality) "UHD" else "HD"
   }
 
-  // Динамические цвета Material 3 (Monet)
-  val containerColor by animateColorAsState(
-    targetValue = if (isHighQuality) {
-      MaterialTheme.colorScheme.primaryContainer
+  val isDark = !MaterialTheme.colors.isLight
+
+  // Привязка к системной палитре Monet (Android 12+) с фоллбэком на палитру темы
+  val monetPrimaryContainer = remember(isDark) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val resId = if (isDark) android.R.color.system_accent1_700 else android.R.color.system_accent1_100
+      Color(ContextCompat.getColor(context, resId))
     } else {
-      MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
-    },
-    animationSpec = tween(durationMillis = 250)
+      MaterialTheme.colors.primary.copy(alpha = if (isDark) 0.35f else 0.22f)
+    }
+  }
+
+  val monetOnPrimaryContainer = remember(isDark) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val resId = if (isDark) android.R.color.system_accent1_100 else android.R.color.system_accent1_900
+      Color(ContextCompat.getColor(context, resId))
+    } else {
+      MaterialTheme.colors.primary
+    }
+  }
+
+  val monetSecondaryContainer = remember(isDark) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val resId = if (isDark) android.R.color.system_accent2_800 else android.R.color.system_accent2_100
+      Color(ContextCompat.getColor(context, resId)).copy(alpha = 0.8f)
+    } else {
+      MaterialTheme.colors.onSurface.copy(alpha = if (isDark) 0.15f else 0.08f)
+    }
+  }
+
+  val monetOnSecondaryContainer = remember(isDark) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val resId = if (isDark) android.R.color.system_accent2_100 else android.R.color.system_accent2_900
+      Color(ContextCompat.getColor(context, resId))
+    } else {
+      MaterialTheme.colors.onSurface.copy(alpha = 0.85f)
+    }
+  }
+
+  val containerColor by animateColorAsState(
+    targetValue = if (isHighQuality) monetPrimaryContainer else monetSecondaryContainer,
+    animationSpec = tween(durationMillis = 200)
   )
 
   val contentColor by animateColorAsState(
-    targetValue = if (isHighQuality) {
-      MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-      MaterialTheme.colorScheme.onSecondaryContainer
-    },
-    animationSpec = tween(durationMillis = 250)
+    targetValue = if (isHighQuality) monetOnPrimaryContainer else monetOnSecondaryContainer,
+    animationSpec = tween(durationMillis = 200)
   )
 
-  // Анимация нажатия (MD3 bounce feedback)
+  // MD3 Bounce эффект при нажатии
   val interactionSource = remember { MutableInteractionSource() }
   val isPressed by interactionSource.collectIsPressedAsState()
   val scale by animateFloatAsState(
@@ -84,7 +115,7 @@ actual fun MediaQualityButton(
       .background(containerColor)
       .clickable(
         interactionSource = interactionSource,
-        indication = rememberRipple(bounded = true),
+        indication = null,
         onClick = {
           if (isVideo) {
             val next = if (videoQuality == VideoQuality.FHD) VideoQuality.FULL_RES else VideoQuality.FHD
@@ -105,18 +136,13 @@ actual fun MediaQualityButton(
             (slideOutVertically { height -> -height } + fadeOut())
       }
     ) { targetText ->
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-      ) {
-        Text(
-          text = targetText,
-          color = contentColor,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Bold,
-          letterSpacing = 0.5.sp
-        )
-      }
+      Text(
+        text = targetText,
+        color = contentColor,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.5.sp
+      )
     }
   }
 }
