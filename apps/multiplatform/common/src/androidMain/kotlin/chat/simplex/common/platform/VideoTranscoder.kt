@@ -13,7 +13,7 @@ object VideoTranscoder {
 
   private const val TAG = "VideoTranscoder"
   private const val TIMEOUT_USEC = 10_000L
-  private const val TARGET_BITRATE = 6_000_000 // 6 Mbps для FHD
+  private const val TARGET_BITRATE = 6_000_000 // 6 Mbps для качественного FHD
 
   fun transcodeTo1080p(inputFile: File, outputFile: File): Boolean {
     val extractor = MediaExtractor()
@@ -45,7 +45,7 @@ object VideoTranscoder {
 
       if (videoTrackIndex == -1 || inputVideoFormat == null) return false
 
-      // 1. Извлекаем угол поворота из метаданных
+      // 1. Извлекаем исходный угол наклона (orientation/rotation)
       val rotation = try {
         var rot = 0
         if (inputVideoFormat.containsKey(MediaFormat.KEY_ROTATION)) {
@@ -62,21 +62,33 @@ object VideoTranscoder {
         0
       }
 
-      val rawWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
-      val rawHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
+      val srcWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
+      val srcHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
 
-      // 2. Рассчитываем целевое разрешение строго по физическим пропорциям
-      val (targetWidth, targetHeight) = if (rawWidth >= rawHeight) {
-        // Горизонтальный исходник (включая вертикальные видео с камеры с флагом rotation=90)
-        val scale = 1080f / rawHeight.toFloat()
-        ((rawWidth * scale).toInt() and 1.inv()) to 1080
+      // 2. Определяем реальное видимое положение готового видео
+      val isRotated = (rotation == 90 || rotation == 270)
+      val visualWidth = if (isRotated) srcHeight else srcWidth
+      val visualHeight = if (isRotated) srcWidth else srcHeight
+
+      // 3. Рассчитываем целевой видимый размер строго без растягивания (кратно 2)
+      val (targetVisualWidth, targetVisualHeight) = if (visualWidth >= visualHeight) {
+        // Горизонтальное видео: уменьшаем до 1080p по высоте
+        val scale = 1080f / visualHeight.toFloat()
+        ((visualWidth * scale).toInt() and 1.inv()) to 1080
       } else {
-        // Физически вертикальный исходник (rawWidth < rawHeight)
-        val scale = 1080f / rawWidth.toFloat()
-        1080 to ((rawHeight * scale).toInt() and 1.inv())
+        // Вертикальное видео: уменьшаем до 1080p по ширине
+        val scale = 1080f / visualWidth.toFloat()
+        1080 to ((visualHeight * scale).toInt() and 1.inv())
       }
 
-      val outputVideoFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight).apply {
+      // 4. Физические размеры для энкодера с учетом контейнера
+      val (targetRawWidth, targetRawHeight) = if (isRotated) {
+        targetVisualHeight to targetVisualWidth
+      } else {
+        targetVisualWidth to targetVisualHeight
+      }
+
+      val outputVideoFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetRawWidth, targetRawHeight).apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
         setInteger(MediaFormat.KEY_BIT_RATE, TARGET_BITRATE)
         setInteger(MediaFormat.KEY_FRAME_RATE, 30)
@@ -88,7 +100,7 @@ object VideoTranscoder {
       }
 
       eglCore = EglCore(encoder.createInputSurface())
-      outputSurface = CodecOutputSurface(targetWidth, targetHeight)
+      outputSurface = CodecOutputSurface(srcWidth, srcHeight, targetRawWidth, targetRawHeight)
 
       val videoMime = inputVideoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
       decoder = MediaCodec.createDecoderByType(videoMime).apply {
@@ -98,6 +110,7 @@ object VideoTranscoder {
       encoder.start()
       decoder.start()
 
+      // Переносим исходный угол наклона ролика в новый контейнер
       muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
         if (rotation != 0) {
           setOrientationHint(rotation)
@@ -180,7 +193,7 @@ object VideoTranscoder {
         }
       }
 
-      // 3. Копируем аудиодорожку напрямую без потерь
+      // Переносим исходный звук без пересжатия
       if (audioTrackIndex != -1 && muxerStarted) {
         extractor.unselectTrack(videoTrackIndex)
         extractor.selectTrack(audioTrackIndex)
@@ -257,8 +270,10 @@ object VideoTranscoder {
   }
 
   private class CodecOutputSurface(
-    private val width: Int,
-    private val height: Int
+    rawWidth: Int,
+    rawHeight: Int,
+    private val targetWidth: Int,
+    private val targetHeight: Int
   ) : SurfaceTexture.OnFrameAvailableListener {
 
     private val surfaceTexture: SurfaceTexture
@@ -269,7 +284,10 @@ object VideoTranscoder {
     private var texId = 0
     private val transformMatrix = FloatArray(16)
     private var uTexMatrixLoc = -1
+    private var aPositionLoc = -1
+    private var aTexCoordLoc = -1
     private val vertexBuffer: FloatBuffer
+    private val texCoordBuffer: FloatBuffer
 
     init {
       val textures = IntArray(1)
@@ -278,27 +296,42 @@ object VideoTranscoder {
       GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId)
       GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
       GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+      GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+      GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
       surfaceTexture = SurfaceTexture(texId).apply {
-        setDefaultBufferSize(width, height)
+        setDefaultBufferSize(rawWidth, rawHeight)
         setOnFrameAvailableListener(this@CodecOutputSurface)
       }
       surface = android.view.Surface(surfaceTexture)
 
-      // Полноэкранный квад с текстурными координатами (0,0)-(1,1)
-      val quadData = floatArrayOf(
-        // X,      Y,    U,    V
-        -1.0f, -1.0f, 0.0f, 0.0f,
-         1.0f, -1.0f, 1.0f, 0.0f,
-        -1.0f,  1.0f, 0.0f, 1.0f,
-         1.0f,  1.0f, 1.0f, 1.0f
+      // Стандартный полноэкранный квад
+      val vertexCoords = floatArrayOf(
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
       )
-
-      vertexBuffer = ByteBuffer.allocateDirect(quadData.size * 4)
+      vertexBuffer = ByteBuffer.allocateDirect(vertexCoords.size * 4)
         .order(ByteOrder.nativeOrder())
         .asFloatBuffer()
         .apply {
-          put(quadData)
+          put(vertexCoords)
+          position(0)
+        }
+
+      // Текстурные координаты без ручного смещения осей
+      val texCoords = floatArrayOf(
+        0.0f, 0.0f,
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        1.0f, 1.0f
+      )
+      texCoordBuffer = ByteBuffer.allocateDirect(texCoords.size * 4)
+        .order(ByteOrder.nativeOrder())
+        .asFloatBuffer()
+        .apply {
+          put(texCoords)
           position(0)
         }
 
@@ -323,26 +356,24 @@ object VideoTranscoder {
     }
 
     fun drawImage() {
-      // Системная матрица SurfaceTexture автоматически корректирует инверсию оси Y
       surfaceTexture.getTransformMatrix(transformMatrix)
 
-      GLES20.glViewport(0, 0, width, height)
+      GLES20.glViewport(0, 0, targetWidth, targetHeight)
       GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
       GLES20.glUseProgram(program)
 
       GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, transformMatrix, 0)
 
-      vertexBuffer.position(0)
-      val aPos = GLES20.glGetAttribLocation(program, "aPosition")
-      GLES20.glEnableVertexAttribArray(aPos)
-      GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, vertexBuffer)
+      GLES20.glEnableVertexAttribArray(aPositionLoc)
+      GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
 
-      vertexBuffer.position(2)
-      val aTex = GLES20.glGetAttribLocation(program, "aTexCoord")
-      GLES20.glEnableVertexAttribArray(aTex)
-      GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 16, vertexBuffer)
+      GLES20.glEnableVertexAttribArray(aTexCoordLoc)
+      GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer)
 
       GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+      GLES20.glDisableVertexAttribArray(aPositionLoc)
+      GLES20.glDisableVertexAttribArray(aTexCoordLoc)
     }
 
     private fun initShader() {
@@ -376,6 +407,8 @@ object VideoTranscoder {
       }
 
       uTexMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix")
+      aPositionLoc = GLES20.glGetAttribLocation(program, "aPosition")
+      aTexCoordLoc = GLES20.glGetAttribLocation(program, "aTexCoord")
     }
 
     private fun loadShader(type: Int, code: String): Int = GLES20.glCreateShader(type).also {
