@@ -7,6 +7,7 @@ import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.FloatBuffer
 
 object VideoTranscoder {
 
@@ -44,7 +45,7 @@ object VideoTranscoder {
 
       if (videoTrackIndex == -1 || inputVideoFormat == null) return false
 
-      // 1. Извлекаем исходный угол поворота
+      // 1. Извлекаем угол поворота
       val rotation = try {
         var rot = 0
         if (inputVideoFormat.containsKey(MediaFormat.KEY_ROTATION)) {
@@ -64,18 +65,15 @@ object VideoTranscoder {
       val rawWidth = inputVideoFormat.getInteger(MediaFormat.KEY_WIDTH)
       val rawHeight = inputVideoFormat.getInteger(MediaFormat.KEY_HEIGHT)
 
-      // 2. Определяем реальную визуальную ориентацию видео
       val isPortrait = (rotation == 90 || rotation == 270)
       val visualWidth = if (isPortrait) rawHeight else rawWidth
       val visualHeight = if (isPortrait) rawWidth else rawHeight
 
-      // 3. Рассчитываем точные размеры без искажения пропорций
+      // 2. Корректные целевые габариты энкодера
       val (targetWidth, targetHeight) = if (isPortrait) {
-        // Вертикальное видео: ширина фиксируется на 1080p
         val scale = 1080f / visualWidth.toFloat()
         1080 to ((visualHeight * scale).toInt() and 1.inv())
       } else {
-        // Горизонтальное видео: высота фиксируется на 1080p
         val scale = 1080f / visualHeight.toFloat()
         ((visualWidth * scale).toInt() and 1.inv()) to 1080
       }
@@ -92,8 +90,8 @@ object VideoTranscoder {
       }
 
       eglCore = EglCore(encoder.createInputSurface())
-      // Передаем угол в рендерер для аппаратного разворота кадра
-      outputSurface = CodecOutputSurface(targetWidth, targetHeight, rotation)
+      // Передаем как сырые размеры декодера, так и размеры энкодера
+      outputSurface = CodecOutputSurface(rawWidth, rawHeight, targetWidth, targetHeight, rotation)
 
       val videoMime = inputVideoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
       decoder = MediaCodec.createDecoderByType(videoMime).apply {
@@ -103,7 +101,6 @@ object VideoTranscoder {
       encoder.start()
       decoder.start()
 
-      // Флаг ориентации оставляем 0: видео запекается сразу в правильном положении
       muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
       var muxerVideoTrack = -1
@@ -182,7 +179,6 @@ object VideoTranscoder {
         }
       }
 
-      // Проброс исходной аудиодорожки
       if (audioTrackIndex != -1 && muxerStarted) {
         extractor.unselectTrack(videoTrackIndex)
         extractor.selectTrack(audioTrackIndex)
@@ -259,9 +255,11 @@ object VideoTranscoder {
   }
 
   private class CodecOutputSurface(
-    private val width: Int,
-    private val height: Int,
-    private val rotation: Int
+    rawWidth: Int,
+    rawHeight: Int,
+    private val targetWidth: Int,
+    private val targetHeight: Int,
+    rotation: Int
   ) : SurfaceTexture.OnFrameAvailableListener {
 
     private val surfaceTexture: SurfaceTexture
@@ -271,9 +269,9 @@ object VideoTranscoder {
     private var program = 0
     private var texId = 0
     private val transformMatrix = FloatArray(16)
-    private val finalMatrix = FloatArray(16)
-    private val rotMatrix = FloatArray(16)
     private var uTexMatrixLoc = -1
+    private val vertexBuffer: FloatBuffer
+    private val texCoordBuffer: FloatBuffer
 
     init {
       val textures = IntArray(1)
@@ -283,11 +281,60 @@ object VideoTranscoder {
       GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
       GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
 
+      // Важно: буфер SurfaceTexture выставляем в сырые размеры декодера!
       surfaceTexture = SurfaceTexture(texId).apply {
-        setDefaultBufferSize(width, height)
+        setDefaultBufferSize(rawWidth, rawHeight)
         setOnFrameAvailableListener(this@CodecOutputSurface)
       }
       surface = android.view.Surface(surfaceTexture)
+
+      // Прямоугольник отрисовщика
+      val quadCoords = floatArrayOf(
+        -1.0f, -1.0f,
+         1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f
+      )
+      vertexBuffer = ByteBuffer.allocateDirect(quadCoords.size * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
+          put(quadCoords)
+          position(0)
+        }
+
+      // Прямое сопоставление углов сенсора без искажений матрицы
+      val texCoords = when (rotation) {
+        90 -> floatArrayOf(
+          0.0f, 1.0f, // BL
+          0.0f, 0.0f, // BR
+          1.0f, 1.0f, // TL
+          1.0f, 0.0f  // TR
+        )
+        180 -> floatArrayOf(
+          1.0f, 1.0f,
+          0.0f, 1.0f,
+          1.0f, 0.0f,
+          0.0f, 0.0f
+        )
+        270 -> floatArrayOf(
+          1.0f, 0.0f,
+          1.0f, 1.0f,
+          0.0f, 0.0f,
+          0.0f, 1.0f
+        )
+        else -> floatArrayOf(
+          0.0f, 0.0f,
+          1.0f, 0.0f,
+          0.0f, 1.0f,
+          1.0f, 1.0f
+        )
+      }
+
+      texCoordBuffer = ByteBuffer.allocateDirect(texCoords.size * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
+          put(texCoords)
+          position(0)
+        }
+
       initShader()
     }
 
@@ -311,21 +358,20 @@ object VideoTranscoder {
     fun drawImage() {
       surfaceTexture.getTransformMatrix(transformMatrix)
 
-      // Поворачиваем текстурные координаты вокруг центра кадра (0.5, 0.5)
-      if (rotation != 0) {
-        Matrix.setIdentityM(rotMatrix, 0)
-        Matrix.translateM(rotMatrix, 0, 0.5f, 0.5f, 0f)
-        Matrix.rotateM(rotMatrix, 0, -rotation.toFloat(), 0f, 0f, 1f)
-        Matrix.translateM(rotMatrix, 0, -0.5f, -0.5f, 0f)
-        Matrix.multiplyMM(finalMatrix, 0, transformMatrix, 0, rotMatrix, 0)
-      } else {
-        System.arraycopy(transformMatrix, 0, finalMatrix, 0, 16)
-      }
-
-      GLES20.glViewport(0, 0, width, height)
+      GLES20.glViewport(0, 0, targetWidth, targetHeight)
       GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
       GLES20.glUseProgram(program)
-      GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, finalMatrix, 0)
+
+      GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, transformMatrix, 0)
+
+      val aPos = GLES20.glGetAttribLocation(program, "aPosition")
+      GLES20.glEnableVertexAttribArray(aPos)
+      GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+
+      val aTex = GLES20.glGetAttribLocation(program, "aTexCoord")
+      GLES20.glEnableVertexAttribArray(aTex)
+      GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer)
+
       GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
@@ -360,23 +406,6 @@ object VideoTranscoder {
       }
 
       uTexMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix")
-
-      val quadData = floatArrayOf(
-        -1.0f, -1.0f, 0f, 0f,
-         1.0f, -1.0f, 1f, 0f,
-        -1.0f,  1.0f, 0f, 1f,
-         1.0f,  1.0f, 1f, 1f
-      )
-      val buffer = ByteBuffer.allocateDirect(quadData.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quadData)
-      buffer.position(0)
-      val aPos = GLES20.glGetAttribLocation(program, "aPosition")
-      GLES20.glEnableVertexAttribArray(aPos)
-      GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, buffer)
-
-      buffer.position(2)
-      val aTex = GLES20.glGetAttribLocation(program, "aTexCoord")
-      GLES20.glEnableVertexAttribArray(aTex)
-      GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 16, buffer)
     }
 
     private fun loadShader(type: Int, code: String): Int = GLES20.glCreateShader(type).also {
