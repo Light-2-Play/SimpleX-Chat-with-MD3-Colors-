@@ -168,8 +168,7 @@ fun getThemeFromUri(uri: URI, withAlertOnException: Boolean = true): ThemeOverri
 expect fun saveImageFromUriPlatform(uri: URI): CryptoFile?
 
 fun saveImage(uri: URI): CryptoFile? {
-  val bitmap = getBitmapFromUri(uri) ?: return null
-  return saveImage(bitmap)
+  return saveImageFromUriPlatform(uri)
 }
 
 fun saveImage(image: ImageBitmap): CryptoFile? {
