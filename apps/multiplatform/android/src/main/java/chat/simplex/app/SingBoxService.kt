@@ -228,7 +228,6 @@ object SingBoxService {
         // Выводим точный текст ошибки прямо в UI диалога
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
       }
-    }
     } else {
       var rawJson: String? = null
       for (url in SUBSCRIPTION_URLS) {
