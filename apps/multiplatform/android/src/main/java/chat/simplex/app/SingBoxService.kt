@@ -215,15 +215,20 @@ object SingBoxService {
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
-    if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
-      val customOutbound = resolveCustomOutbound(getCustomKey(context))
-      if (customOutbound != null) {
-        cleanOutbounds.put(customOutbound)
-        targetTag = customOutbound.optString("tag", "custom-proxy")
-      } else {
-        // Строго английский текст для любых UI Alert'ов
-        throw IllegalArgumentException("Invalid configuration format. Supported links: VLESS, AWG, or Amnezia VPN.")
+   if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
+      try {
+        val customOutbound = resolveCustomOutbound(getCustomKey(context))
+        if (customOutbound != null) {
+          cleanOutbounds.put(customOutbound)
+          targetTag = customOutbound.optString("tag", "custom-proxy")
+        } else {
+          throw IllegalArgumentException("Unsupported proxy configuration format")
+        }
+      } catch (e: Exception) {
+        // Выводим точный текст ошибки прямо в UI диалога
+        throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
       }
+    }
     } else {
       var rawJson: String? = null
       for (url in SUBSCRIPTION_URLS) {
@@ -316,7 +321,7 @@ object SingBoxService {
 
     // 1. Amnezia vpn:// URI
     if (input.startsWith("vpn://", ignoreCase = true)) {
-      parseAmneziaVpn(input)?.let { return it }
+      return parseAmneziaVpn(input)
     }
 
     // 2. HTTP subscription
@@ -348,22 +353,24 @@ object SingBoxService {
 
     return parseVlessUri(content)
   }
-  
-  private fun parseAmneziaVpn(vpnUri: String): JSONObject? {
-    val decodedText = decodeAmneziaVpnUri(vpnUri) ?: return null
 
-    // 1. INI-формат (.conf) внутри vpn://
+  private fun parseAmneziaVpn(vpnUri: String): JSONObject {
+    val decodedText = decodeAmneziaVpnUri(vpnUri)
+      ?: throw IllegalArgumentException("Amnezia payload decoding failed (invalid Base64 or zlib)")
+
+    // Вариант 1: Текстовый INI [Interface]
     if (decodedText.contains("[Interface]", ignoreCase = true) && !decodedText.trim().startsWith("{")) {
       return parseAwgConf(decodedText, "custom-proxy")
+        ?: throw IllegalArgumentException("Amnezia INI config missing required keys (PrivateKey/PublicKey/Endpoint)")
     }
 
-    // 2. JSON-формат внутри vpn://
+    // Вариант 2: JSON-структура Amnezia
     if (decodedText.trim().startsWith("{") || decodedText.trim().startsWith("[")) {
       return parseAmneziaJsonToOutbound(decodedText)
+        ?: throw IllegalArgumentException("Amnezia JSON parsed, but no AWG container found or keys are missing")
     }
 
-    Log.w(TAG, "Amnezia config decrypted but format unrecognized. Starts with: ${decodedText.take(20)}")
-    return null
+    throw IllegalArgumentException("Amnezia decrypted, but unknown payload structure: ${decodedText.take(25)}...")
   }
 
   private fun decodeAmneziaVpnUri(vpnUri: String): String? {
@@ -372,38 +379,23 @@ object SingBoxService {
       if (raw.startsWith("vpn://", ignoreCase = true)) {
         raw = raw.substring(6)
       }
-      
-      // Убираем комментарии URI и пробелы
       raw = raw.substringBefore("#").substringBefore("?").trim()
       raw = raw.replace("\\s".toRegex(), "")
 
-      var rawBytes: ByteArray? = null
-      
-      // 1. Пытаемся раскодировать нативно со всеми возможными флагами
-      val flags = listOf(
-        Base64.DEFAULT,
-        Base64.URL_SAFE,
-        Base64.NO_PADDING,
-        Base64.URL_SAFE or Base64.NO_PADDING
-      )
-      for (flag in flags) {
-        try {
-          rawBytes = Base64.decode(raw, flag)
-          if (rawBytes != null && rawBytes.isNotEmpty()) break
-        } catch (_: Exception) {}
-      }
-      
-      // 2. Если нативно не вышло — восстанавливаем паддинг вручную
-      if (rawBytes == null) {
-        val cleanB64 = raw.replace('-', '+').replace('_', '/').trimEnd('=') // Важно: убираем старые '='
-        val mod = cleanB64.length % 4
-        val paddedB64 = if (mod != 0) cleanB64 + "=".repeat(4 - mod) else cleanB64
-        rawBytes = Base64.decode(paddedB64, Base64.DEFAULT)
+      // Декодирование Base64 с перебором паддингов
+      val cleanB64 = raw.replace('-', '+').replace('_', '/').trimEnd('=')
+      val mod = cleanB64.length % 4
+      val paddedB64 = if (mod != 0) cleanB64 + "=".repeat(4 - mod) else cleanB64
+
+      val rawBytes = try {
+        Base64.decode(paddedB64, Base64.DEFAULT)
+      } catch (_: Exception) {
+        Base64.decode(raw, Base64.URL_SAFE or Base64.NO_PADDING)
       }
 
       decompressPayload(rawBytes)
     } catch (e: Exception) {
-      Log.e(TAG, "Failed to decode vpn:// URI: ${e.message}")
+      Log.e(TAG, "decodeAmneziaVpnUri error: ${e.message}")
       null
     }
   }
