@@ -9,16 +9,12 @@ import android.util.Log
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
-import java.util.zip.GZIPInputStream
-import java.util.zip.Inflater
 import kotlin.concurrent.thread
-import java.nio.charset.StandardCharsets
 
 object SingBoxService {
 
@@ -178,7 +174,7 @@ object SingBoxService {
     isRunning = false
   }
 
- private fun prepareConfig(context: Context): File {
+  private fun prepareConfig(context: Context): File {
     val configFile = File(context.filesDir, "singbox_active.json")
     val root = JSONObject()
 
@@ -215,17 +211,16 @@ object SingBoxService {
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
-   if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
+    if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
       try {
         val customOutbound = resolveCustomOutbound(getCustomKey(context))
         if (customOutbound != null) {
           cleanOutbounds.put(customOutbound)
           targetTag = customOutbound.optString("tag", "custom-proxy")
         } else {
-          throw IllegalArgumentException("Unsupported proxy configuration format")
+          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
         }
       } catch (e: Exception) {
-        // Выводим точный текст ошибки прямо в UI диалога
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
       }
     } else {
@@ -241,7 +236,7 @@ object SingBoxService {
           Log.w(TAG, "Failed to download subscription from $url: ${e.message}")
         }
       }
-      
+
       if (rawJson.isNullOrBlank()) {
         if (configFile.exists()) return configFile
         throw IllegalStateException("Failed to download subscription")
@@ -318,12 +313,6 @@ object SingBoxService {
       }
     } catch (_: Exception) {}
 
-    // 1. Amnezia vpn:// URI
-    if (input.startsWith("vpn://", ignoreCase = true)) {
-      return parseAmneziaVpn(input)
-    }
-
-    // 2. HTTP subscription
     val content = if (input.startsWith("http://", ignoreCase = true) || input.startsWith("https://", ignoreCase = true)) {
       try {
         val downloaded = downloadUrl(input)
@@ -341,571 +330,12 @@ object SingBoxService {
       input
     }
 
-    // 3. VLESS
     val vlessLine = content.lines().firstOrNull { it.trim().startsWith("vless://", ignoreCase = true) }?.trim()
     if (vlessLine != null) {
-      parseVlessUri(vlessLine)?.let { return it }
+      return parseVlessUri(vlessLine)
     }
-
-    // 4. AmneziaWG (.conf or awg://)
-    parseAwg(content)?.let { return it }
 
     return parseVlessUri(content)
-  }
-
-  private fun parseAmneziaVpn(vpnUri: String): JSONObject {
-    val decodedText = decodeAmneziaVpnUri(vpnUri)
-      ?: throw IllegalArgumentException("Amnezia payload decoding failed (invalid Base64 or zlib)")
-
-    // Вариант 1: Текстовый INI [Interface]
-    if (decodedText.contains("[Interface]", ignoreCase = true) && !decodedText.trim().startsWith("{")) {
-      return parseAwgConf(decodedText, "custom-proxy")
-        ?: throw IllegalArgumentException("Amnezia INI config missing required keys (PrivateKey/PublicKey/Endpoint)")
-    }
-
-    // Вариант 2: JSON-структура Amnezia
-    if (decodedText.trim().startsWith("{") || decodedText.trim().startsWith("[")) {
-      return parseAmneziaJsonToOutbound(decodedText)
-        ?: throw IllegalArgumentException("Amnezia JSON parsed, but no AWG container found or keys are missing")
-    }
-
-    throw IllegalArgumentException("Amnezia decrypted, but unknown payload structure: ${decodedText.take(25)}...")
-  }
-
-  private fun decodeAmneziaVpnUri(vpnUri: String): String? {
-    return try {
-      var raw = vpnUri.trim().removeSurrounding("\"").removeSurrounding("'")
-      if (raw.startsWith("vpn://", ignoreCase = true)) {
-        raw = raw.substring(6)
-      }
-      raw = raw.substringBefore("#").substringBefore("?").trim()
-      raw = raw.replace("\\s".toRegex(), "")
-
-      // Декодирование Base64 с перебором паддингов
-      val cleanB64 = raw.replace('-', '+').replace('_', '/').trimEnd('=')
-      val mod = cleanB64.length % 4
-      val paddedB64 = if (mod != 0) cleanB64 + "=".repeat(4 - mod) else cleanB64
-
-      val rawBytes = try {
-        Base64.decode(paddedB64, Base64.DEFAULT)
-      } catch (_: Exception) {
-        Base64.decode(raw, Base64.URL_SAFE or Base64.NO_PADDING)
-      }
-
-      decompressPayload(rawBytes)
-    } catch (e: Exception) {
-      Log.e(TAG, "decodeAmneziaVpnUri error: ${e.message}")
-      null
-    }
-  }
-
-  private fun decompressPayload(bytes: ByteArray): String? {
-    // 1. Пытаемся прочитать как чистый текст
-    val directText = try { String(bytes, Charsets.UTF_8).trim().removePrefix("\uFEFF") } catch (_: Exception) { "" }
-    if (directText.startsWith("{") || directText.contains("[Interface]", ignoreCase = true) || directText.startsWith("[")) {
-      return directText
-    }
-
-    // 2. Пытаемся прочитать как стандартный ZIP (Некоторые клиенты Amnezia экспортируют так)
-    try {
-      val zis = java.util.zip.ZipInputStream(bytes.inputStream())
-      var entry = zis.nextEntry
-      while (entry != null) {
-        val res = zis.bufferedReader(Charsets.UTF_8).readText().trim().removePrefix("\uFEFF")
-        if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
-          return res
-        }
-        entry = zis.nextEntry
-      }
-    } catch (_: Exception) {}
-
-    // 3. Пытаемся прочитать как Inflater (zlib) с разными смещениями (Amnezia часто пишет магические 4 байта в начало)
-    for (offset in listOf(0, 4)) {
-      if (bytes.size <= offset) continue
-      for (nowrap in listOf(false, true)) {
-        try {
-          val inflater = java.util.zip.Inflater(nowrap)
-          inflater.setInput(bytes, offset, bytes.size - offset)
-          val bos = java.io.ByteArrayOutputStream()
-          val buffer = ByteArray(4096)
-          while (!inflater.finished()) {
-            val count = inflater.inflate(buffer)
-            if (count > 0) {
-              bos.write(buffer, 0, count)
-            } else {
-              if (inflater.needsInput() || inflater.needsDictionary()) break
-            }
-          }
-          inflater.end()
-          val res = bos.toString("UTF-8").trim().removePrefix("\uFEFF")
-          if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
-            return res
-          }
-        } catch (_: Exception) {}
-      }
-    }
-
-    // 4. Пытаемся прочитать как GZIP
-    try {
-      val gis = java.util.zip.GZIPInputStream(bytes.inputStream())
-      val res = gis.bufferedReader(Charsets.UTF_8).readText().trim().removePrefix("\uFEFF")
-      if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
-        return res
-      }
-    } catch (_: Exception) {}
-
-    return if (directText.isNotBlank()) directText else null
-  }
-
-private fun parseAmneziaJsonToOutbound(jsonStr: String): JSONObject? {
-    val cleanJson = jsonStr.trim().removePrefix("\uFEFF")
-    if (cleanJson.isBlank()) return null
-
-    // 1. Корень может быть объектом {...} или массивом [...]
-    val root = if (cleanJson.startsWith("[")) {
-      val arr = JSONArray(cleanJson)
-      if (arr.length() == 0) return null
-      arr.getJSONObject(0)
-    } else {
-      JSONObject(cleanJson)
-    }
-
-    // 2. Проверка на API-токен Amnezia Free / Premium
-    if (root.has("api_endpoint") || root.has("api_key")) {
-      throw IllegalArgumentException("Amnezia Free API token detected. Please export static config from Amnezia app: Server -> Share -> For AmneziaWG (.conf)")
-    }
-
-    // 3. Извлечение адреса сервера
-    var hostName = root.optString("hostName")
-      .ifBlank { root.optString("host") }
-      .ifBlank { root.optString("ip") }
-      .ifBlank { root.optString("server") }
-      .ifBlank { root.optString("server_ip") }
-      .ifBlank { root.optString("address") }
-
-    var defaultPort = root.optInt("port", 0)
-
-    // 4. Сбор всех доступных контейнеров
-    val containers = root.optJSONArray("containers")
-    val candidateContainers = mutableListOf<JSONObject>()
-    if (containers != null) {
-      for (i in 0 until containers.length()) {
-        val c = containers.optJSONObject(i) ?: continue
-        candidateContainers.add(c)
-      }
-    } else {
-      candidateContainers.add(root)
-    }
-
-    // Приоритет: сначала контейнеры с awg / wireguard
-    val sortedContainers = candidateContainers.sortedByDescending { c ->
-      val name = c.optString("container", "").lowercase()
-      if (name.contains("awg")) 2 else if (name.contains("wireguard")) 1 else 0
-    }
-
-    for (containerObj in sortedContainers) {
-      if (hostName.isBlank()) {
-        hostName = containerObj.optString("hostName")
-          .ifBlank { containerObj.optString("ip") }
-          .ifBlank { containerObj.optString("server") }
-      }
-      if (defaultPort <= 0) {
-        defaultPort = containerObj.optInt("port", 0)
-      }
-
-      val subKeys = listOf("awg", "amnezia-awg", "wireguard", "amnezia-wireguard")
-      val potentialConfigs = mutableListOf<JSONObject>()
-      for (k in subKeys) {
-        containerObj.optJSONObject(k)?.let { potentialConfigs.add(it) }
-      }
-      potentialConfigs.add(containerObj)
-
-      for (cfg in potentialConfigs) {
-        // Вариант А: текстовый INI-конфиг внутри last_config или config
-        val rawConf = cfg.opt("last_config") ?: cfg.opt("config")
-        if (rawConf != null) {
-          val confStr = when (rawConf) {
-            is JSONObject -> rawConf.optString("config", rawConf.toString())
-            is String -> {
-              val s = rawConf.trim()
-              if (s.startsWith("{")) {
-                try { JSONObject(s).optString("config", s) } catch (_: Exception) { s }
-              } else s
-            }
-            else -> rawConf.toString()
-          }
-
-          if (confStr.contains("[Interface]", ignoreCase = true)) {
-            val ob = parseAwgConf(confStr, "custom-proxy", defaultHost = hostName, defaultPort = defaultPort)
-            if (ob != null) return ob
-          }
-        }
-
-        // Вариант Б: ключи лежат напрямую полями JSON
-        val obDirect = buildWireguardOutboundFromJson(cfg, hostName, defaultPort)
-        if (obDirect != null) return obDirect
-      }
-    }
-
-    // 5. Если контейнер не подошел — показываем реальные ключи JSON прямо в ошибке
-    val availableKeys = root.keys().asSequence().toList().joinToString(", ")
-    throw IllegalArgumentException("No AWG config found. JSON keys: [$availableKeys]")
-  }
- 
-  private fun buildWireguardOutboundFromJson(cfg: JSONObject, defaultHost: String, defaultPort: Int): JSONObject? {
-    try {
-      val privateKey = cfg.optString("client_priv_key")
-        .ifBlank { cfg.optString("private_key") }
-        .ifBlank { cfg.optString("priv_key") }
-        .ifBlank { cfg.optString("privatekey") }
-
-      val peerPublicKey = cfg.optString("server_pub_key")
-        .ifBlank { cfg.optString("public_key") }
-        .ifBlank { cfg.optString("pub_key") }
-        .ifBlank { cfg.optString("publickey") }
-
-      var server = cfg.optString("hostName")
-        .ifBlank { cfg.optString("server") }
-        .ifBlank { cfg.optString("ip") }
-        .ifBlank { defaultHost }
-
-      if (server.isBlank() && cfg.has("endpoint")) {
-        server = cfg.optString("endpoint").substringBefore(":")
-      }
-
-      var serverPort = cfg.optInt("port", 0)
-      if (serverPort <= 0) serverPort = cfg.optString("port").toIntOrNull() ?: 0
-      if (serverPort <= 0 && cfg.has("endpoint") && cfg.optString("endpoint").contains(":")) {
-        serverPort = cfg.optString("endpoint").substringAfter(":").toIntOrNull() ?: 0
-      }
-      if (serverPort <= 0) serverPort = defaultPort
-      if (serverPort <= 0) serverPort = 51820
-
-      if (privateKey.isBlank() || peerPublicKey.isBlank() || server.isBlank()) {
-        return null
-      }
-
-      val addrRaw = cfg.optString("client_ip")
-        .ifBlank { cfg.optString("address") }
-        .ifBlank { cfg.optString("ip") }
-        .ifBlank { "10.8.0.2/32" }
-
-      val localAddresses = JSONArray().apply {
-        addrRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { addr ->
-          val formatted = if (!addr.contains("/")) {
-            if (addr.contains(":")) "$addr/128" else "$addr/32"
-          } else {
-            addr
-          }
-          put(formatted)
-        }
-      }
-
-      fun getIntParam(vararg keys: String): Int? {
-        for (k in keys) {
-          if (cfg.has(k)) {
-            val v = cfg.optInt(k, -1)
-            if (v >= 0) return v
-            val sv = cfg.optString(k).toIntOrNull()
-            if (sv != null && sv >= 0) return sv
-          }
-        }
-        return null
-      }
-
-      fun getMagicParam(vararg keys: String): Long? {
-        for (k in keys) {
-          if (cfg.has(k)) {
-            val optVal = cfg.opt(k)
-            if (optVal is Number) return optVal.toLong() and 0xFFFFFFFFL
-            val str = cfg.optString(k).trim()
-            if (str.isNotBlank()) {
-              return if (str.startsWith("0x", ignoreCase = true)) {
-                str.substring(2).toLongOrNull(16)
-              } else {
-                str.toLongOrNull()
-              }?.let { it and 0xFFFFFFFFL }
-            }
-          }
-        }
-        return null
-      }
-
-      val jc = getIntParam("Jc", "jc", "junk_packet_count")
-      val jmin = getIntParam("Jmin", "jmin", "junk_packet_min_size")
-      val jmax = getIntParam("Jmax", "jmax", "junk_packet_max_size")
-      val s1 = getIntParam("S1", "s1", "init_packet_junk_size")
-      val s2 = getIntParam("S2", "s2", "response_packet_junk_size")
-
-      val h1 = getMagicParam("H1", "h1", "init_packet_magic_header")
-      val h2 = getMagicParam("H2", "h2", "response_packet_magic_header")
-      val h3 = getMagicParam("H3", "h3", "underload_packet_magic_header")
-      val h4 = getMagicParam("H4", "h4", "transport_packet_magic_header")
-
-      val psk = cfg.optString("psk").ifBlank { cfg.optString("preshared_key") }
-      val mtu = cfg.optInt("mtu", 0).let { if (it > 0) it else cfg.optString("mtu").toIntOrNull() }
-
-      return JSONObject().apply {
-        put("type", "wireguard")
-        put("tag", "amnezia-free")
-        put("server", server)
-        put("server_port", serverPort)
-        put("local_address", localAddresses)
-        put("private_key", privateKey)
-        put("peer_public_key", peerPublicKey)
-
-        if (psk.isNotBlank()) put("pre_shared_key", psk)
-        if (mtu != null && mtu > 0) put("mtu", mtu)
-
-        if (jc != null) put("junk_packet_count", jc)
-        if (jmin != null) put("junk_packet_min_size", jmin)
-        if (jmax != null) put("junk_packet_max_size", jmax)
-        if (s1 != null) put("init_packet_junk_size", s1)
-        if (s2 != null) put("response_packet_junk_size", s2)
-        if (h1 != null) put("init_packet_magic_header", h1)
-        if (h2 != null) put("response_packet_magic_header", h2)
-        if (h3 != null) put("underload_packet_magic_header", h3)
-        if (h4 != null) put("transport_packet_magic_header", h4)
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error building WireGuard outbound from JSON: ${e.message}")
-    }
-    return null
-  }
-
-  private fun parseAwg(raw: String): JSONObject? {
-    val trimmed = raw.trim()
-
-    if (trimmed.startsWith("awg://", ignoreCase = true)) {
-      val tag = if (trimmed.contains("#")) trimmed.substringAfter("#") else "awg-proxy"
-      val uriPart = trimmed.removePrefix("awg://").removePrefix("AWG://").substringBefore("#").trim()
-
-      try {
-        var b64 = uriPart
-        val mod = b64.length % 4
-        if (mod != 0) b64 += "=".repeat(4 - mod)
-        val decoded = String(Base64.decode(b64, Base64.DEFAULT or Base64.URL_SAFE), Charsets.UTF_8)
-        if (decoded.contains("[Interface]", ignoreCase = true) || decoded.contains("PrivateKey", ignoreCase = true)) {
-          return parseAwgConf(decoded, tag)
-        }
-      } catch (_: Exception) {}
-
-      try {
-        val uri = Uri.parse(trimmed)
-        val privateKey = uri.userInfo.orEmpty()
-        val server = uri.host.orEmpty()
-        val port = if (uri.port != -1) uri.port else 51820
-        val peerPublicKey = uri.getQueryParameter("public_key")
-          ?: uri.getQueryParameter("peer_public_key")
-          ?: uri.getQueryParameter("pk").orEmpty()
-
-        val addressParam = uri.getQueryParameter("address")
-          ?: uri.getQueryParameter("local_address")
-          ?: uri.getQueryParameter("ip")
-          ?: "10.0.0.2/32"
-
-        val localAddresses = JSONArray().apply {
-          addressParam.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach {
-            val cidr = if (!it.contains("/")) if (it.contains(":")) "$it/128" else "$it/32" else it
-            put(cidr)
-          }
-        }
-
-        if (server.isNotEmpty() && privateKey.isNotEmpty() && peerPublicKey.isNotEmpty()) {
-          return JSONObject().apply {
-            put("type", "wireguard")
-            put("tag", tag)
-            put("server", server)
-            put("server_port", port)
-            put("local_address", localAddresses)
-            put("private_key", privateKey)
-            put("peer_public_key", peerPublicKey)
-
-            (uri.getQueryParameter("preshared_key") ?: uri.getQueryParameter("psk"))?.takeIf { it.isNotBlank() }?.let { put("pre_shared_key", it) }
-            uri.getQueryParameter("mtu")?.toIntOrNull()?.let { put("mtu", it) }
-
-            uri.getQueryParameter("reserved")?.let { rStr ->
-              val rList = rStr.split(",").mapNotNull { it.trim().toIntOrNull() }
-              if (rList.isNotEmpty()) {
-                put("reserved", JSONArray().apply { rList.forEach { put(it) } })
-              }
-            }
-
-            fun parseQueryMagic(param: String?): Long? {
-              if (param == null) return null
-              val s = param.trim()
-              return if (s.startsWith("0x", ignoreCase = true)) s.substring(2).toLongOrNull(16) else s.toLongOrNull()?.let { it and 0xFFFFFFFFL }
-            }
-
-            (uri.getQueryParameter("jc") ?: uri.getQueryParameter("junk_packet_count"))?.toIntOrNull()?.let { put("junk_packet_count", it) }
-            (uri.getQueryParameter("jmin") ?: uri.getQueryParameter("junk_packet_min_size"))?.toIntOrNull()?.let { put("junk_packet_min_size", it) }
-            (uri.getQueryParameter("jmax") ?: uri.getQueryParameter("junk_packet_max_size"))?.toIntOrNull()?.let { put("junk_packet_max_size", it) }
-            (uri.getQueryParameter("s1") ?: uri.getQueryParameter("init_packet_junk_size"))?.toIntOrNull()?.let { put("init_packet_junk_size", it) }
-            (uri.getQueryParameter("s2") ?: uri.getQueryParameter("response_packet_junk_size"))?.toIntOrNull()?.let { put("response_packet_junk_size", it) }
-            parseQueryMagic(uri.getQueryParameter("h1") ?: uri.getQueryParameter("init_packet_magic_header"))?.let { put("init_packet_magic_header", it) }
-            parseQueryMagic(uri.getQueryParameter("h2") ?: uri.getQueryParameter("response_packet_magic_header"))?.let { put("response_packet_magic_header", it) }
-            parseQueryMagic(uri.getQueryParameter("h3") ?: uri.getQueryParameter("underload_packet_magic_header"))?.let { put("underload_packet_magic_header", it) }
-            parseQueryMagic(uri.getQueryParameter("h4") ?: uri.getQueryParameter("transport_packet_magic_header"))?.let { put("transport_packet_magic_header", it) }
-          }
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to parse awg:// link: ${e.message}")
-      }
-    }
-
-    if (trimmed.contains("[Interface]", ignoreCase = true) || trimmed.contains("[Peer]", ignoreCase = true)) {
-      return parseAwgConf(trimmed, "awg-proxy")
-    }
-
-    return null
-  }
-
-  private fun parseAwgConf(
-    confText: String,
-    defaultTag: String,
-    defaultHost: String = "",
-    defaultPort: Int = 51820
-  ): JSONObject? {
-    try {
-      var currentSection = ""
-      var privateKey = ""
-      val localAddresses = JSONArray()
-      var mtu: Int? = null
-
-      var jc: Int? = null
-      var jmin: Int? = null
-      var jmax: Int? = null
-      var s1: Int? = null
-      var s2: Int? = null
-      var h1: Long? = null
-      var h2: Long? = null
-      var h3: Long? = null
-      var h4: Long? = null
-      var reservedArray: JSONArray? = null
-
-      var peerPublicKey = ""
-      var preSharedKey = ""
-      var server = defaultHost
-      var serverPort = if (defaultPort > 0) defaultPort else 51820
-
-      fun parseMagic(str: String): Long? {
-        val s = str.trim()
-        return if (s.startsWith("0x", ignoreCase = true)) {
-          s.substring(2).toLongOrNull(16)
-        } else {
-          s.toLongOrNull()
-        }?.let { it and 0xFFFFFFFFL }
-      }
-
-      for (rawLine in confText.lines()) {
-        val line = rawLine.substringBefore('#').substringBefore(';').trim()
-        if (line.isEmpty()) continue
-
-        if (line.startsWith("[") && line.endsWith("]")) {
-          currentSection = line.substring(1, line.length - 1).trim().lowercase()
-          continue
-        }
-
-        val parts = line.split("=", limit = 2)
-        if (parts.size != 2) continue
-        val key = parts[0].trim().lowercase()
-        val value = parts[1].trim().removeSurrounding("\"").removeSurrounding("'")
-
-        when (currentSection) {
-          "interface" -> {
-            when (key) {
-              "privatekey" -> privateKey = value
-              "address" -> {
-                value.split(",").forEach { addr ->
-                  val trimmedAddr = addr.trim()
-                  if (trimmedAddr.isNotEmpty()) {
-                    val cidr = if (!trimmedAddr.contains("/")) {
-                      if (trimmedAddr.contains(":")) "$trimmedAddr/128" else "$trimmedAddr/32"
-                    } else {
-                      trimmedAddr
-                    }
-                    localAddresses.put(cidr)
-                  }
-                }
-              }
-              "mtu" -> mtu = value.toIntOrNull()
-              "jc" -> jc = value.toIntOrNull()
-              "jmin" -> jmin = value.toIntOrNull()
-              "jmax" -> jmax = value.toIntOrNull()
-              "s1" -> s1 = value.toIntOrNull()
-              "s2" -> s2 = value.toIntOrNull()
-              "h1" -> h1 = parseMagic(value)
-              "h2" -> h2 = parseMagic(value)
-              "h3" -> h3 = parseMagic(value)
-              "h4" -> h4 = parseMagic(value)
-              "reserved" -> {
-                val rList = value.split(",").mapNotNull { it.trim().toIntOrNull() }
-                if (rList.isNotEmpty()) {
-                  reservedArray = JSONArray().apply { rList.forEach { put(it) } }
-                }
-              }
-            }
-          }
-          "peer" -> {
-            when (key) {
-              "publickey" -> peerPublicKey = value
-              "presharedkey" -> preSharedKey = value
-              "endpoint" -> {
-                val lastColon = value.lastIndexOf(':')
-                if (lastColon != -1) {
-                  server = value.substring(0, lastColon).trim().removePrefix("[").removeSuffix("]")
-                  serverPort = value.substring(lastColon + 1).trim().toIntOrNull() ?: defaultPort
-                } else {
-                  server = value
-                }
-              }
-              "reserved" -> {
-                val rList = value.split(",").mapNotNull { it.trim().toIntOrNull() }
-                if (rList.isNotEmpty()) {
-                  reservedArray = JSONArray().apply { rList.forEach { put(it) } }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (server.isBlank() && defaultHost.isNotBlank()) {
-        server = defaultHost
-      }
-
-      if (server.isBlank() || privateKey.isBlank() || peerPublicKey.isBlank()) {
-        Log.w(TAG, "Missing Endpoint, PrivateKey, or PublicKey in AWG configuration")
-        return null
-      }
-
-      return JSONObject().apply {
-        put("type", "wireguard")
-        put("tag", defaultTag)
-        put("server", server)
-        put("server_port", serverPort)
-        put("local_address", if (localAddresses.length() > 0) localAddresses else JSONArray().apply { put("10.0.0.2/32") })
-        put("private_key", privateKey)
-        put("peer_public_key", peerPublicKey)
-
-        if (preSharedKey.isNotBlank()) put("pre_shared_key", preSharedKey)
-        if (mtu != null) put("mtu", mtu)
-        if (reservedArray != null) put("reserved", reservedArray)
-
-        if (jc != null) put("junk_packet_count", jc)
-        if (jmin != null) put("junk_packet_min_size", jmin)
-        if (jmax != null) put("junk_packet_max_size", jmax)
-        if (s1 != null) put("init_packet_junk_size", s1)
-        if (s2 != null) put("response_packet_junk_size", s2)
-        if (h1 != null) put("init_packet_magic_header", h1)
-        if (h2 != null) put("response_packet_magic_header", h2)
-        if (h3 != null) put("underload_packet_magic_header", h3)
-        if (h4 != null) put("transport_packet_magic_header", h4)
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error parsing AWG conf: ${e.message}")
-      return null
-    }
   }
 
   private fun parseVlessUri(vlessUri: String): JSONObject? {
