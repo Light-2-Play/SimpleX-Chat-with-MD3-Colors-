@@ -65,23 +65,27 @@ actual fun saveImageFromUriPlatform(uri: URI): CryptoFile? {
     val destFile = File(getAppFilePath(destFileName))
 
     createTmpFileAndDelete { tmpFile ->
+      // 1. Копируем исходный файл во временную директорию
       copyInputStreamToFile(inputStream, tmpFile, Long.MAX_VALUE)
 
-      // Если выбран HD — уменьшаем до 4MP. Если UHD — берем исходник без сжатия
+      // 2. Применяем HD (4MP) или UHD (оригинал)
       val processedFile = if (quality == PhotoQuality.HD) {
-        val outFile = File(tmpFile.parentFile, "hd_${tmpFile.name}")
+        val hdFile = File(tmpFile.parentFile, "hd_${tmpFile.name}")
         val result = MediaQualityConverter.processPhoto(
-          androidAppContext,
-          tmpFile,
-          PhotoQualityMode.HD,
-          outFile
+          inputFile = tmpFile,
+          qualityMode = PhotoQuality.HD,
+          outputFile = hdFile
         )
-        ChatModel.filesToDelete.add(outFile)
+        if (result != tmpFile) {
+          ChatModel.filesToDelete.add(hdFile)
+        }
         result
       } else {
-        tmpFile // UHD: отправляем оригинальный файл байт-в-байт
+        // UHD: отдаем оригинальный файл без малейших изменений
+        tmpFile
       }
 
+      // 3. Шифруем или перемещаем итоговый файл в хранилище SimpleX
       if (encrypted) {
         try {
           val args = encryptCryptoFile(processedFile.absolutePath, destFile.absolutePath)
