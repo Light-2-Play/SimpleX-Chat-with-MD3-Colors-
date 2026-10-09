@@ -457,118 +457,99 @@ object SingBoxService {
     return if (directText.isNotBlank()) directText else null
   }
 
- private fun parseAmneziaJsonToOutbound(jsonStr: String): JSONObject? {
-    try {
-      val cleanJson = jsonStr.trim().removePrefix("\uFEFF")
-      if (cleanJson.isBlank()) return null
+private fun parseAmneziaJsonToOutbound(jsonStr: String): JSONObject? {
+    val cleanJson = jsonStr.trim().removePrefix("\uFEFF")
+    if (cleanJson.isBlank()) return null
 
-      // 1. Безопасная обработка: корень может быть как объектом {...}, так и массивом [...]
-      val root = if (cleanJson.startsWith("[")) {
-        val arr = JSONArray(cleanJson)
-        if (arr.length() == 0) return null
-        arr.getJSONObject(0)
-      } else {
-        JSONObject(cleanJson)
-      }
-
-      val defaultContainer = root.optString("defaultContainer", "").lowercase()
-
-      // 2. Поиск целевого контейнера с приоритетом для AWG
-      var targetContainerObj: JSONObject? = null
-      val containers = root.optJSONArray("containers")
-      if (containers != null) {
-        // Приоритет 1: контейнер с "awg" в названии
-        for (i in 0 until containers.length()) {
-          val c = containers.optJSONObject(i) ?: continue
-          val name = c.optString("container", "").lowercase()
-          if (name.contains("awg")) {
-            targetContainerObj = c
-            break
-          }
-        }
-        // Приоритет 2: контейнер по умолчанию или wireguard
-        if (targetContainerObj == null) {
-          for (i in 0 until containers.length()) {
-            val c = containers.optJSONObject(i) ?: continue
-            val name = c.optString("container", "").lowercase()
-            if (name == defaultContainer || name.contains("wireguard")) {
-              targetContainerObj = c
-              break
-            }
-          }
-        }
-        // Приоритет 3: берем первый доступный контейнер
-        if (targetContainerObj == null && containers.length() > 0) {
-          targetContainerObj = containers.optJSONObject(0)
-        }
-      }
-
-      val containerObj = targetContainerObj ?: root
-
-      // 3. Извлечение внутренней конфигурации протокола
-      val subObj = containerObj.optJSONObject("awg")
-        ?: containerObj.optJSONObject("amnezia-awg")
-        ?: containerObj.optJSONObject("wireguard")
-        ?: containerObj.optJSONObject("amnezia-wireguard")
-        ?: containerObj
-
-      // 4. Определение хоста и порта (с проверкой всех уровней вложенности)
-      val hostName = root.optString("hostName")
-        .ifBlank { root.optString("ip") }
-        .ifBlank { root.optString("server") }
-        .ifBlank { root.optString("server_ip") }
-        .ifBlank { containerObj.optString("hostName") }
-        .ifBlank { containerObj.optString("ip") }
-        .ifBlank { subObj.optString("hostName") }
-        .ifBlank { subObj.optString("ip") }
-
-      var defaultPort = subObj.optInt("port", 0)
-      if (defaultPort <= 0) defaultPort = containerObj.optInt("port", 0)
-      if (defaultPort <= 0) defaultPort = root.optInt("port", 0)
-      if (defaultPort <= 0) defaultPort = 51820
-
-      // 5. Проверка наличия текстового конфига [Interface] (last_config или config)
-      val lastConfigRaw = subObj.opt("last_config")
-        ?: containerObj.opt("last_config")
-        ?: root.opt("last_config")
-        ?: subObj.opt("config")
-        ?: containerObj.opt("config")
-
-      if (lastConfigRaw != null) {
-        val confString = when (lastConfigRaw) {
-          is String -> {
-            val strTrimmed = lastConfigRaw.trim()
-            if (strTrimmed.startsWith("{")) {
-              try {
-                JSONObject(strTrimmed).optString("config", strTrimmed)
-              } catch (_: Exception) {
-                strTrimmed
-              }
-            } else {
-              strTrimmed
-            }
-          }
-          is JSONObject -> lastConfigRaw.optString("config", lastConfigRaw.toString())
-          else -> lastConfigRaw.toString()
-        }
-
-        if (confString.contains("[Interface]", ignoreCase = true)) {
-          val ob = parseAwgConf(confString, "custom-proxy", defaultHost = hostName, defaultPort = defaultPort)
-          if (ob != null) return ob
-        }
-      }
-
-      // 6. Если текстового INI-конфига нет, собираем параметры напрямую из JSON-полей
-      val obFromJson = buildWireguardOutboundFromJson(subObj, hostName, defaultPort)
-        ?: buildWireguardOutboundFromJson(containerObj, hostName, defaultPort)
-        ?: buildWireguardOutboundFromJson(root, hostName, defaultPort)
-
-      if (obFromJson != null) return obFromJson
-
-    } catch (e: Exception) {
-      Log.e(TAG, "Error parsing Amnezia JSON: ${e.message}")
+    // 1. Корень может быть объектом {...} или массивом [...]
+    val root = if (cleanJson.startsWith("[")) {
+      val arr = JSONArray(cleanJson)
+      if (arr.length() == 0) return null
+      arr.getJSONObject(0)
+    } else {
+      JSONObject(cleanJson)
     }
-    return null
+
+    // 2. Проверка на API-токен Amnezia Free / Premium
+    if (root.has("api_endpoint") || root.has("api_key")) {
+      throw IllegalArgumentException("Amnezia Free API token detected. Please export static config from Amnezia app: Server -> Share -> For AmneziaWG (.conf)")
+    }
+
+    // 3. Извлечение адреса сервера
+    var hostName = root.optString("hostName")
+      .ifBlank { root.optString("host") }
+      .ifBlank { root.optString("ip") }
+      .ifBlank { root.optString("server") }
+      .ifBlank { root.optString("server_ip") }
+      .ifBlank { root.optString("address") }
+
+    var defaultPort = root.optInt("port", 0)
+
+    // 4. Сбор всех доступных контейнеров
+    val containers = root.optJSONArray("containers")
+    val candidateContainers = mutableListOf<JSONObject>()
+    if (containers != null) {
+      for (i in 0 until containers.length()) {
+        val c = containers.optJSONObject(i) ?: continue
+        candidateContainers.add(c)
+      }
+    } else {
+      candidateContainers.add(root)
+    }
+
+    // Приоритет: сначала контейнеры с awg / wireguard
+    val sortedContainers = candidateContainers.sortedByDescending { c ->
+      val name = c.optString("container", "").lowercase()
+      if (name.contains("awg")) 2 else if (name.contains("wireguard")) 1 else 0
+    }
+
+    for (containerObj in sortedContainers) {
+      if (hostName.isBlank()) {
+        hostName = containerObj.optString("hostName")
+          .ifBlank { containerObj.optString("ip") }
+          .ifBlank { containerObj.optString("server") }
+      }
+      if (defaultPort <= 0) {
+        defaultPort = containerObj.optInt("port", 0)
+      }
+
+      val subKeys = listOf("awg", "amnezia-awg", "wireguard", "amnezia-wireguard")
+      val potentialConfigs = mutableListOf<JSONObject>()
+      for (k in subKeys) {
+        containerObj.optJSONObject(k)?.let { potentialConfigs.add(it) }
+      }
+      potentialConfigs.add(containerObj)
+
+      for (cfg in potentialConfigs) {
+        // Вариант А: текстовый INI-конфиг внутри last_config или config
+        val rawConf = cfg.opt("last_config") ?: cfg.opt("config")
+        if (rawConf != null) {
+          val confStr = when (rawConf) {
+            is JSONObject -> rawConf.optString("config", rawConf.toString())
+            is String -> {
+              val s = rawConf.trim()
+              if (s.startsWith("{")) {
+                try { JSONObject(s).optString("config", s) } catch (_: Exception) { s }
+              } else s
+            }
+            else -> rawConf.toString()
+          }
+
+          if (confStr.contains("[Interface]", ignoreCase = true)) {
+            val ob = parseAwgConf(confStr, "custom-proxy", defaultHost = hostName, defaultPort = defaultPort)
+            if (ob != null) return ob
+          }
+        }
+
+        // Вариант Б: ключи лежат напрямую полями JSON
+        val obDirect = buildWireguardOutboundFromJson(cfg, hostName, defaultPort)
+        if (obDirect != null) return obDirect
+      }
+    }
+
+    // 5. Если контейнер не подошел — показываем реальные ключи JSON прямо в ошибке
+    val availableKeys = root.keys().asSequence().toList().joinToString(", ")
+    throw IllegalArgumentException("No AWG config found. JSON keys: [$availableKeys]")
   }
  
   private fun buildWireguardOutboundFromJson(cfg: JSONObject, defaultHost: String, defaultPort: Int): JSONObject? {
