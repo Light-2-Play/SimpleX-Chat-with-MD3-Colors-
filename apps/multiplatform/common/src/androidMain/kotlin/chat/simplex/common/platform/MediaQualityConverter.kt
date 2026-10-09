@@ -5,37 +5,26 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
-import android.media.MediaMetadataRetriever
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-enum class PhotoQualityMode {
-  HD,   // 4 Megapixels (Downscale with aspect ratio preserved)
-  UHD   // Original Full Resolution
-}
-
-enum class VideoQualityMode {
-  FHD,     // 1080p max constraint
-  FULL_RES // Full original resolution
-}
-
 object MediaQualityConverter {
 
   private const val FOUR_MEGAPIXELS = 4_000_000L
-  private const val FHD_MAX_SIDE = 1920
 
   fun processPhoto(
-    context: Context,
     inputFile: File,
-    qualityMode: PhotoQualityMode,
+    qualityMode: PhotoQuality,
     outputFile: File
   ): File {
-    if (qualityMode == PhotoQualityMode.UHD) {
+    // 1. В режиме UHD или если режим не HD — отдаем оригинальный файл без изменений
+    if (qualityMode == PhotoQuality.UHD) {
       return inputFile
     }
 
+    // 2. Читаем размеры без загрузки пикселей в память
     val boundsOptions = BitmapFactory.Options().apply {
       inJustDecodeBounds = true
     }
@@ -45,14 +34,20 @@ object MediaQualityConverter {
     val srcHeight = boundsOptions.outHeight
     val totalPixels = srcWidth.toLong() * srcHeight.toLong()
 
-    if (totalPixels <= FOUR_MEGAPIXELS) {
+    // Если фото уже <= 4MP, пережатие не требуется
+    if (totalPixels <= 0 || totalPixels <= FOUR_MEGAPIXELS) {
       return inputFile
     }
 
+    // 3. Рассчитываем пропорциональный масштаб под лимит 4MP
     val scaleFactor = sqrt(FOUR_MEGAPIXELS.toDouble() / totalPixels.toDouble())
     val targetWidth = (srcWidth * scaleFactor).roundToInt()
     val targetHeight = (srcHeight * scaleFactor).roundToInt()
 
+    // Считываем поворот EXIF до декодирования
+    val exifRotation = getExifRotation(inputFile)
+
+    // 4. Безопасное декодирование с inSampleSize против OOM
     val decodeOptions = BitmapFactory.Options().apply {
       inSampleSize = calculateInSampleSize(srcWidth, srcHeight, targetWidth, targetHeight)
       inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -61,44 +56,34 @@ object MediaQualityConverter {
     val decodedBitmap = BitmapFactory.decodeFile(inputFile.absolutePath, decodeOptions) 
       ?: return inputFile
 
-    val exifRotation = getExifRotation(inputFile)
-    val matrix = Matrix().apply {
-      if (exifRotation != 0f) postRotate(exifRotation)
-    }
-
+    // 5. Масштабируем до точных габаритов 4MP
     val scaledBitmap = Bitmap.createScaledBitmap(decodedBitmap, targetWidth, targetHeight, true)
+
+    // 6. Запекаем ориентацию, если исходник был повернут камерой
     val finalBitmap = if (exifRotation != 0f) {
+      val matrix = Matrix().apply { postRotate(exifRotation) }
       Bitmap.createBitmap(scaledBitmap, 0, 0, scaledBitmap.width, scaledBitmap.height, matrix, true)
     } else {
       scaledBitmap
     }
 
+    // Сохраняем в целевой файл
     FileOutputStream(outputFile).use { out ->
       finalBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
     }
 
-    if (decodedBitmap != finalBitmap && !decodedBitmap.isRecycled) decodedBitmap.recycle()
-    if (scaledBitmap != finalBitmap && !scaledBitmap.isRecycled) scaledBitmap.recycle()
-    if (!finalBitmap.isRecycled) finalBitmap.recycle()
+    // Освобождаем память
+    if (decodedBitmap != scaledBitmap && decodedBitmap != finalBitmap && !decodedBitmap.isRecycled) {
+      decodedBitmap.recycle()
+    }
+    if (scaledBitmap != finalBitmap && !scaledBitmap.isRecycled) {
+      scaledBitmap.recycle()
+    }
+    if (!finalBitmap.isRecycled) {
+      finalBitmap.recycle()
+    }
 
     return outputFile
-  }
-
-  fun shouldDownscaleVideo(videoFile: File, mode: VideoQualityMode): Boolean {
-    if (mode == VideoQualityMode.FULL_RES) return false
-
-    val retriever = MediaMetadataRetriever()
-    return try {
-      retriever.setDataSource(videoFile.absolutePath)
-      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-      val maxSide = maxOf(width, height)
-      maxSide > FHD_MAX_SIDE
-    } catch (_: Exception) {
-      false
-    } finally {
-      retriever.release()
-    }
   }
 
   private fun calculateInSampleSize(srcWidth: Int, srcHeight: Int, reqWidth: Int, reqHeight: Int): Int {
