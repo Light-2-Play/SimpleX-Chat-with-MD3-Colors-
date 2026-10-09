@@ -59,32 +59,72 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 
-// Векторная иконка щита Material 3 (кэшируется в памяти)
+// Векторная иконка щита в щите с молнией (кэшируется в памяти)
 val ShieldIcon: ImageVector by lazy {
-    ImageVector.Builder(
-        name = "Shield",
-        defaultWidth = 24.dp,
-        defaultHeight = 24.dp,
-        viewportWidth = 24f,
-        viewportHeight = 24f
-    ).apply {
-        path(fill = SolidColor(Color.White)) {
-            moveTo(12f, 1f)
-            lineTo(3f, 5f)
-            verticalLineToRelative(6f)
-            curveToRelative(0f, 5.55f, 3.84f, 10.74f, 9f, 12f)
-            curveToRelative(5.16f, -1.26f, 9f, -6.45f, 9f, -12f)
-            verticalLineTo(5f)
-            lineToRelative(-9f, -4f)
-            close()
-        }
-    }.build()
+  ImageVector.Builder(
+    name = "ShieldShieldBolt",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+  ).apply {
+    // 1. Внешний щит (контур)
+    path(
+      stroke = SolidColor(Color.White),
+      strokeLineWidth = 1.5f,
+      strokeLineCap = StrokeCap.Round,
+      strokeLineJoin = StrokeJoin.Round
+    ) {
+      moveTo(12f, 2f)
+      lineTo(4f, 5.5f)
+      verticalLineTo(11f)
+      curveTo(4f, 16.3f, 7.4f, 21.2f, 12f, 22.4f)
+      curveTo(16.6f, 21.2f, 20f, 16.3f, 20f, 11f)
+      verticalLineTo(5.5f)
+      lineTo(12f, 2f)
+      close()
+    }
+
+    // 2. Внутренний щит (контур)
+    path(
+      stroke = SolidColor(Color.White),
+      strokeLineWidth = 1.2f,
+      strokeLineCap = StrokeCap.Round,
+      strokeLineJoin = StrokeJoin.Round
+    ) {
+      moveTo(12f, 5.5f)
+      lineTo(6.5f, 8f)
+      verticalLineTo(11.5f)
+      curveTo(6.5f, 15.2f, 8.8f, 18.7f, 12f, 19.7f)
+      curveTo(15.2f, 18.7f, 17.5f, 15.2f, 17.5f, 11.5f)
+      verticalLineTo(8f)
+      lineTo(12f, 5.5f)
+      close()
+    }
+
+    // 3. Молния по центру (заливка)
+    path(
+      fill = SolidColor(Color.White)
+    ) {
+      moveTo(12.3f, 8.5f)
+      lineTo(9.5f, 12.5f)
+      lineTo(11.7f, 12.5f)
+      lineTo(10.9f, 17.0f)
+      lineTo(15.0f, 11.5f)
+      lineTo(12.5f, 11.5f)
+      lineTo(13.7f, 8.5f)
+      close()
+    }
+  }.build()
 }
 
-// Мост для вызова Android-диалога из кроссплатформенного Compose
+// Мост для вызова диалога и передачи статуса подключения
 object ByeDpiBridge {
   var showDialog: (() -> Unit)? = null
+  val isRunning = mutableStateOf(false)
 }
 
 enum class PresetTagKind { GROUP_REPORTS, FAVORITES, CONTACTS, GROUPS, CHANNELS, BUSINESS, NOTES }
@@ -653,10 +693,17 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
         }
       }
     },
-    onTitleClick = if (canScrollToZero.value) { { scrollToBottom(scope, listState) } } else null,
-    onTop = !oneHandUI.value,
-    onSearchValueChanged = {},
     buttons = {
+      val isVpnActive = ByeDpiBridge.isRunning.value
+      val vpnTint by animateColorAsState(
+        targetValue = if (isVpnActive) {
+          MaterialTheme.colors.primary // Акцент Monet при активном VPN
+        } else {
+          MaterialTheme.colors.onBackground.copy(alpha = 0.65f)
+        },
+        animationSpec = tween(durationMillis = 250)
+      )
+
       IconButton(
         onClick = {
           ByeDpiBridge.showDialog?.invoke()
@@ -664,14 +711,13 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
       ) {
         Icon(
           imageVector = ShieldIcon,
-          contentDescription = "ByeDPI Presets",
-          tint = MaterialTheme.colors.onBackground
+          contentDescription = "VLESS Proxy Settings",
+          tint = vpnTint
         )
       }
       barButtons.forEach { it() }
     }
-  )
-}
+    
 @Composable
 fun SubscriptionStatusIndicator(click: (() -> Unit)) {
   var subs by remember { mutableStateOf(SMPServerSubs.newSMPServerSubs) }
