@@ -645,6 +645,7 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
   val clipboard = LocalClipboardManager.current
   val scope = rememberCoroutineScope()
   val canScrollToZero = remember { derivedStateOf { listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0 } }
+  
   DefaultAppBar(
     navigationButton = {
       if (chatModel.users.isEmpty() && !chatModel.desktopNoUserNoRemote) {
@@ -693,11 +694,14 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
         }
       }
     },
+    onTitleClick = if (canScrollToZero.value) { { scrollToBottom(scope, listState) } } else null,
+    onTop = !oneHandUI.value,
+    onSearchValueChanged = {},
     buttons = {
       val isVpnActive = ByeDpiBridge.isRunning.value
       val vpnTint by animateColorAsState(
         targetValue = if (isVpnActive) {
-          MaterialTheme.colors.primary // Акцент Monet при активном VPN
+          MaterialTheme.colors.primary // Monet акцент при активном VPN
         } else {
           MaterialTheme.colors.onBackground.copy(alpha = 0.65f)
         },
@@ -717,6 +721,8 @@ private fun ChatListToolbar(userPickerState: MutableStateFlow<AnimatedViewState>
       }
       barButtons.forEach { it() }
     }
+  )
+}
     
 @Composable
 fun SubscriptionStatusIndicator(click: (() -> Unit)) {
