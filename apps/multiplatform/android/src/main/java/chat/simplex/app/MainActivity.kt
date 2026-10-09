@@ -69,9 +69,10 @@ class MainActivity: FragmentActivity() {
     openByeDpiDialog = {
       showSingBoxDialogState.value = true
     }
-    ByeDpiBridge.showDialog = {
-      showSingBoxDialogState.value = true
-    }
+   ByeDpiBridge.showDialog = {
+    showSingBoxDialogState.value = true
+}
+ByeDpiBridge.isRunning.value = SingBoxService.isRunning
 
     MediaQualityManager.init(applicationContext)
 
@@ -186,6 +187,7 @@ class MainActivity: FragmentActivity() {
   override fun onResume() {
     super.onResume()
     AppLock.recheckAuthState()
+    ByeDpiBridge.isRunning.value = SingBoxService.isRunning
   }
 
   override fun onPause() {
