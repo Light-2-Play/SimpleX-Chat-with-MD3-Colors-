@@ -50,6 +50,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.padding
 import chat.simplex.common.platform.getLoadedFileSource
 import chat.simplex.common.platform.MediaQualityManager
+import chat.simplex.common.views.helpers.SingBoxBridge
 
 // Глобальное состояние для управления диалогом SingBox из Compose
 var showSingBoxDialogState = mutableStateOf(false)
