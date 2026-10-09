@@ -352,14 +352,17 @@ object SingBoxService {
   private fun parseAmneziaVpn(vpnUri: String): JSONObject? {
     val decodedText = decodeAmneziaVpnUri(vpnUri) ?: return null
 
+    // 1. INI-формат (.conf) внутри vpn://
     if (decodedText.contains("[Interface]", ignoreCase = true) && !decodedText.trim().startsWith("{")) {
-      return parseAwgConf(decodedText, "amnezia-free")
+      return parseAwgConf(decodedText, "custom-proxy")
     }
 
+    // 2. JSON-формат внутри vpn://
     if (decodedText.trim().startsWith("{") || decodedText.trim().startsWith("[")) {
       return parseAmneziaJsonToOutbound(decodedText)
     }
 
+    Log.w(TAG, "Amnezia config decrypted but format unrecognized. Starts with: ${decodedText.take(20)}")
     return null
   }
 
@@ -369,17 +372,33 @@ object SingBoxService {
       if (raw.startsWith("vpn://", ignoreCase = true)) {
         raw = raw.substring(6)
       }
+      
+      // Убираем комментарии URI и пробелы
       raw = raw.substringBefore("#").substringBefore("?").trim()
       raw = raw.replace("\\s".toRegex(), "")
 
-      val cleanB64 = raw.replace('-', '+').replace('_', '/')
-      val mod = cleanB64.length % 4
-      val paddedB64 = if (mod != 0) cleanB64 + "=".repeat(4 - mod) else cleanB64
-
-      val rawBytes = try {
-        Base64.decode(paddedB64, Base64.DEFAULT)
-      } catch (_: Exception) {
-        Base64.decode(raw, Base64.URL_SAFE or Base64.NO_PADDING)
+      var rawBytes: ByteArray? = null
+      
+      // 1. Пытаемся раскодировать нативно со всеми возможными флагами
+      val flags = listOf(
+        Base64.DEFAULT,
+        Base64.URL_SAFE,
+        Base64.NO_PADDING,
+        Base64.URL_SAFE or Base64.NO_PADDING
+      )
+      for (flag in flags) {
+        try {
+          rawBytes = Base64.decode(raw, flag)
+          if (rawBytes != null && rawBytes.isNotEmpty()) break
+        } catch (_: Exception) {}
+      }
+      
+      // 2. Если нативно не вышло — восстанавливаем паддинг вручную
+      if (rawBytes == null) {
+        val cleanB64 = raw.replace('-', '+').replace('_', '/').trimEnd('=') // Важно: убираем старые '='
+        val mod = cleanB64.length % 4
+        val paddedB64 = if (mod != 0) cleanB64 + "=".repeat(4 - mod) else cleanB64
+        rawBytes = Base64.decode(paddedB64, Base64.DEFAULT)
       }
 
       decompressPayload(rawBytes)
@@ -390,18 +409,33 @@ object SingBoxService {
   }
 
   private fun decompressPayload(bytes: ByteArray): String? {
-    val directText = try { String(bytes, Charsets.UTF_8).trim() } catch (_: Exception) { "" }
-    if (directText.startsWith("{") || directText.contains("[Interface]") || directText.startsWith("[")) {
+    // 1. Пытаемся прочитать как чистый текст
+    val directText = try { String(bytes, Charsets.UTF_8).trim().removePrefix("\uFEFF") } catch (_: Exception) { "" }
+    if (directText.startsWith("{") || directText.contains("[Interface]", ignoreCase = true) || directText.startsWith("[")) {
       return directText
     }
 
-    for (offset in listOf(4, 0)) {
+    // 2. Пытаемся прочитать как стандартный ZIP (Некоторые клиенты Amnezia экспортируют так)
+    try {
+      val zis = java.util.zip.ZipInputStream(bytes.inputStream())
+      var entry = zis.nextEntry
+      while (entry != null) {
+        val res = zis.bufferedReader(Charsets.UTF_8).readText().trim().removePrefix("\uFEFF")
+        if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
+          return res
+        }
+        entry = zis.nextEntry
+      }
+    } catch (_: Exception) {}
+
+    // 3. Пытаемся прочитать как Inflater (zlib) с разными смещениями (Amnezia часто пишет магические 4 байта в начало)
+    for (offset in listOf(0, 4)) {
       if (bytes.size <= offset) continue
       for (nowrap in listOf(false, true)) {
         try {
-          val inflater = Inflater(nowrap)
+          val inflater = java.util.zip.Inflater(nowrap)
           inflater.setInput(bytes, offset, bytes.size - offset)
-          val bos = ByteArrayOutputStream()
+          val bos = java.io.ByteArrayOutputStream()
           val buffer = ByteArray(4096)
           while (!inflater.finished()) {
             val count = inflater.inflate(buffer)
@@ -413,17 +447,18 @@ object SingBoxService {
           }
           inflater.end()
           val res = bos.toString("UTF-8").trim().removePrefix("\uFEFF")
-          if (res.startsWith("{") || res.contains("[Interface]") || res.startsWith("[")) {
+          if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
             return res
           }
         } catch (_: Exception) {}
       }
     }
 
+    // 4. Пытаемся прочитать как GZIP
     try {
-      val gis = GZIPInputStream(bytes.inputStream())
+      val gis = java.util.zip.GZIPInputStream(bytes.inputStream())
       val res = gis.bufferedReader(Charsets.UTF_8).readText().trim().removePrefix("\uFEFF")
-      if (res.startsWith("{") || res.contains("[Interface]") || res.startsWith("[")) {
+      if (res.startsWith("{") || res.contains("[Interface]", ignoreCase = true) || res.startsWith("[")) {
         return res
       }
     } catch (_: Exception) {}
