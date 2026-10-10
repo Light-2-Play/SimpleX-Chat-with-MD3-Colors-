@@ -7,7 +7,6 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
-import chat.simplex.common.model.ChatModel
 import chat.simplex.common.views.chatlist.ByeDpiBridge
 import org.json.JSONArray
 import org.json.JSONObject
@@ -156,7 +155,6 @@ object SingBoxService {
             ByeDpiBridge.isRunning.value = true
           }
 
-          // Проверяем прохождение реального трафика через локальный SOCKS5
           var checkSuccess = false
           var checkError = ""
           try {
@@ -178,11 +176,6 @@ object SingBoxService {
 
           if (checkSuccess) {
             showToast(context, "Proxy connected & verified ($LOCAL_PORT)")
-          } else {
-            val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
-            showToast(context, "Proxy open, but test failed: $checkError$logInfo")
-          }
-            }
           } else {
             val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
             showToast(context, "Proxy open, but test failed: $checkError$logInfo")
@@ -233,7 +226,6 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // Системный DNS устройства + резервный публичный DNS
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
         put(JSONObject().apply {
