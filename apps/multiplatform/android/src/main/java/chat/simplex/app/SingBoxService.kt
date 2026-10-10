@@ -177,8 +177,8 @@ object SingBoxService {
     val root = JSONObject()
 
     // 1. Логирование
-    root.put("log", JSONObject().apply {
-      put("level", "warn")
+   root.put("log", JSONObject().apply {
+      put("level", "info")
     })
 
     // 2. Входящий SOCKS5
