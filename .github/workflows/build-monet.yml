@@ -19,15 +19,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-
       - name: Accept Android SDK Licenses
         run: yes | sdkmanager --licenses || true
 
-      # Скачиваем официальные APK и распаковываем библиотеки
+      # Скачиваем официальные APK и распаковываем Haskell core библиотеки
       - name: Extract prebuilt Haskell core from official APK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -35,20 +30,16 @@ jobs:
           mkdir -p /tmp/apk_extract
           cd /tmp/apk_extract
           
-          # Скачиваем все APK из релиза
           gh release download --repo simplex-chat/simplex-chat --pattern "*.apk" --clobber
           
-          # Распаковываем библиотеки
           for apk in *.apk; do
             echo "Распаковка библиотек из $apk..."
             unzip -qo "$apk" "lib/*"
           done
           
-          # Копируем библиотеки в проект
           mkdir -p $GITHUB_WORKSPACE/apps/multiplatform/android/src/main/jniLibs
           cp -r lib/* $GITHUB_WORKSPACE/apps/multiplatform/android/src/main/jniLibs/
           
-          # Удаляем дубликат libapp-lib.so (его заново собрал CMake)
           find $GITHUB_WORKSPACE/apps/multiplatform/android/src/main/jniLibs -name "libapp-lib.so" -delete
           
           mkdir -p $GITHUB_WORKSPACE/apps/multiplatform/common/src/commonMain/cpp/android/libs
@@ -57,94 +48,19 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x apps/multiplatform/gradlew
 
-      - name: Build ByeByeDPI (romanvht) for arm64
-        run: |
-          export GIT_TERMINAL_PROMPT=0
-          git clone --depth 1 --recurse-submodules https://github.com/romanvht/ByeByeDPI.git byedpi-src
-
-          NDK_PATH="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
-          CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
-
-          cd byedpi-src/app/src/main/cpp/byedpi
-          rm -f win_service.c
-
-          cat << 'EOF' > jni_bridge.c
-          #include <jni.h>
-          #include <string.h>
-          #include <stdlib.h>
-          #include <pthread.h>
-          #include <android/log.h>
-
-          #define LOG_TAG "ciadpi"
-          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-
-          extern int ciadpi_main(int argc, char **argv);
-
-          static void* run_ciadpi(void* arg) {
-              char* cmd = (char*)arg;
-              char* argv[64];
-              int argc = 0;
-              argv[argc++] = "ciadpi";
-
-              char* token = strtok(cmd, " ");
-              while (token != NULL && argc < 63) {
-                  argv[argc++] = token;
-                  token = strtok(NULL, " ");
-              }
-              argv[argc] = NULL;
-
-              LOGI("Starting ciadpi native loop");
-              ciadpi_main(argc, argv);
-              LOGI("ciadpi native loop finished");
-              free(cmd);
-              return NULL;
-          }
-
-          JNIEXPORT jint JNICALL
-          Java_chat_simplex_app_ByeDpiService_startNative(JNIEnv *env, jobject thiz, jstring args) {
-              const char *native_args = (*env)->GetStringUTFChars(env, args, 0);
-              char *cmd = strdup(native_args);
-              (*env)->ReleaseStringUTFChars(env, args, native_args);
-
-              pthread_t tid;
-              if (pthread_create(&tid, NULL, run_ciadpi, cmd) != 0) {
-                  free(cmd);
-                  return -1;
-              }
-              pthread_detach(tid);
-              return 0;
-          }
-          EOF
-
-          $CLANG -O2 -shared -fPIC -D_DEFAULT_SOURCE -Dmain=ciadpi_main -o libciadpi.so *.c -llog
-
-          cd "$GITHUB_WORKSPACE"
-          mkdir -p apps/multiplatform/android/src/main/jniLibs/arm64-v8a
-          cp byedpi-src/app/src/main/cpp/byedpi/libciadpi.so apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libciadpi.so
-          rm -rf byedpi-src
-
-      # Подготовка ядра Sing-Box для Android arm64
+      # Принудительная загрузка стабильного ядра Sing-Box для Android arm64
       - name: Prepare sing-box core for Android
         run: |
           mkdir -p apps/multiplatform/android/src/main/jniLibs/arm64-v8a
           TARGET_SO="$GITHUB_WORKSPACE/apps/multiplatform/android/src/main/jniLibs/arm64-v8a/libsingbox.so"
 
-          # 1. Если в репозиторий уже залит кастомный libsingbox.so (например, с патчем AWG) — берем его
-          if [ -f "$TARGET_SO" ] && [ -s "$TARGET_SO" ]; then
-            echo "Используется пользовательский бинарник libsingbox.so из репозитория."
-            chmod +x "$TARGET_SO"
-            ls -lh "$TARGET_SO"
-            exit 0
-          fi
-
-          # 2. Иначе скачиваем стабильный официальный релиз (гарантированная успешная сборка)
-          echo "Кастомный бинарник не найден. Загрузка официального ядра Sing-Box..."
+          echo "Загрузка официального стабильного ядра Sing-Box v1.11.4..."
           curl -Lo singbox.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.11.4/sing-box-1.11.4-android-arm64.tar.gz
           tar -xzf singbox.tar.gz
           cp sing-box-*/sing-box "$TARGET_SO"
           chmod +x "$TARGET_SO"
           ls -lh "$TARGET_SO"
-          
+
       - name: Build Debug APK
         run: |
           cd apps/multiplatform
@@ -163,10 +79,8 @@ jobs:
             filename=$(basename "$apk")
             echo "Processing $filename..."
 
-            # 1. Принудительно выравниваем страницы памяти на 4 КБ
             $ZIPALIGN -f -p 4 "$apk" "aligned-$filename"
 
-            # 2. Подписываем выровненный файл постоянным ключом
             $APKSIGNER sign \
               --ks release.jks \
               --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
