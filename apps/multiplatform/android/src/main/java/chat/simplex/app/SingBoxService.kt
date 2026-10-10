@@ -15,6 +15,7 @@ import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
+import java.nio.charset.StandardCharsets
 import kotlin.concurrent.thread
 
 object SingBoxService {
@@ -149,7 +150,6 @@ object SingBoxService {
 
         if (portOpen) {
           isRunning = true
-          // Синхронизируем статус с кнопкой Щита в UI
           Handler(Looper.getMainLooper()).post {
             ByeDpiBridge.isRunning.value = true
           }
@@ -178,7 +178,6 @@ object SingBoxService {
       process = null
     } catch (_: Exception) {}
     isRunning = false
-    // Сбрасываем подсветку кнопки Щита в UI
     Handler(Looper.getMainLooper()).post {
       ByeDpiBridge.isRunning.value = false
     }
@@ -189,7 +188,8 @@ object SingBoxService {
     val root = JSONObject()
 
     root.put("log", JSONObject().apply {
-      put("level", "warn")
+      put("level", "info")
+      put("timestamp", true)
     })
 
     val socksInbound = JSONObject().apply {
@@ -200,12 +200,17 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // Системный DNS устройства (не блокируется операторами в РФ)
+    // Надежный DNS: Yandex IP (не блокируется операторами в РФ) + резервные DoH
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
         put(JSONObject().apply {
-          put("tag", "local-dns")
-          put("address", "local")
+          put("tag", "google-doh")
+          put("address", "https://8.8.8.8/dns-query")
+          put("detour", "direct")
+        })
+        put(JSONObject().apply {
+          put("tag", "quad9-doh")
+          put("address", "https://9.9.9.9/dns-query")
           put("detour", "direct")
         })
       }
@@ -223,7 +228,7 @@ object SingBoxService {
         if (customOutbounds.isNotEmpty()) {
           targetTag = registerOutboundsWithUrlTest(cleanOutbounds, customOutbounds, context)
         } else {
-          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
+          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS link or Subscription URL.")
         }
       } catch (e: Exception) {
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
@@ -322,7 +327,6 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        // Официальный эндпоинт проверки сети Android Google (не блокируется операторами)
         put("url", "http://connectivitycheck.gstatic.com/generate_204")
         put("interval", "2m")
         put("tolerance", 50)
@@ -350,7 +354,7 @@ object SingBoxService {
       try {
         val downloaded = downloadUrl(input)
         val decoded = try {
-          String(Base64.decode(downloaded.trim(), Base64.DEFAULT))
+          String(Base64.decode(downloaded.trim(), Base64.DEFAULT), StandardCharsets.UTF_8)
         } catch (_: Exception) {
           downloaded
         }
@@ -363,12 +367,21 @@ object SingBoxService {
       input
     }
 
+    var workingContent = content
+    if (!workingContent.startsWith("vless://", ignoreCase = true) && !workingContent.startsWith("{")) {
+      try {
+        val b64Decoded = String(Base64.decode(workingContent, Base64.DEFAULT), StandardCharsets.UTF_8).trim()
+        if (b64Decoded.contains("vless://", ignoreCase = true) || b64Decoded.startsWith("{")) {
+          workingContent = b64Decoded
+        }
+      } catch (_: Exception) {}
+    }
+
     val results = mutableListOf<JSONObject>()
 
-    // Если передан JSON с массивом outbounds
-    if (content.startsWith("{") && content.contains("\"outbounds\"")) {
+    if (workingContent.startsWith("{") && workingContent.contains("\"outbounds\"")) {
       try {
-        val json = JSONObject(content)
+        val json = JSONObject(workingContent)
         val outbounds = json.optJSONArray("outbounds") ?: JSONArray()
         for (i in 0 until outbounds.length()) {
           val ob = outbounds.getJSONObject(i)
@@ -380,8 +393,7 @@ object SingBoxService {
       } catch (_: Exception) {}
     }
 
-    // Разбор одиночных или многострочных vless://
-    for (line in content.lines()) {
+    for (line in workingContent.lines()) {
       val trimmed = line.trim()
       if (trimmed.startsWith("vless://", ignoreCase = true)) {
         parseVlessUri(trimmed)?.let { results.add(it) }
@@ -393,20 +405,36 @@ object SingBoxService {
 
   private fun parseVlessUri(vlessUri: String): JSONObject? {
     return try {
-      val uri = Uri.parse(vlessUri.trim())
-      if (uri.scheme != "vless") return null
+      val cleanUri = vlessUri.trim()
+      val uri = Uri.parse(cleanUri)
+      if (uri.scheme?.lowercase() != "vless") return null
 
-      val uuid = uri.userInfo ?: return null
-      val server = uri.host ?: return null
+      val uuid = uri.userInfo?.takeIf { it.isNotBlank() } ?: return null
+      val server = uri.host?.takeIf { it.isNotBlank() } ?: return null
       val port = if (uri.port != -1) uri.port else 443
 
-      val security = uri.getQueryParameter("security") ?: "none"
-      val flow = uri.getQueryParameter("flow")
-      val sni = uri.getQueryParameter("sni") ?: server
-      val pbk = uri.getQueryParameter("pbk").orEmpty()
-      val sid = uri.getQueryParameter("sid").orEmpty()
+      val security = (uri.getQueryParameter("security") ?: "none").lowercase()
+      val flow = uri.getQueryParameter("flow")?.takeIf { it.isNotBlank() }
+      val sni = uri.getQueryParameter("sni")
+        ?: uri.getQueryParameter("serverName")
+        ?: uri.getQueryParameter("peer")
+        ?: server
+      val pbk = uri.getQueryParameter("pbk")
+        ?: uri.getQueryParameter("publicKey")
+        .orEmpty()
+      val sid = uri.getQueryParameter("sid")
+        ?: uri.getQueryParameter("shortId")
+        .orEmpty()
       val fp = uri.getQueryParameter("fp") ?: "chrome"
-      val tag = uri.fragment?.takeIf { it.isNotBlank() } ?: "vless-proxy"
+      val type = (uri.getQueryParameter("type") ?: "tcp").lowercase()
+      val path = uri.getQueryParameter("path") ?: "/"
+      val host = uri.getQueryParameter("host") ?: sni
+      val serviceName = uri.getQueryParameter("serviceName") ?: ""
+
+      val rawFragment = uri.fragment
+      val tag = if (!rawFragment.isNullOrBlank()) {
+        try { java.net.URLDecoder.decode(rawFragment, "UTF-8") } catch (_: Exception) { rawFragment }
+      } else "vless-proxy"
 
       JSONObject().apply {
         put("type", "vless")
@@ -414,23 +442,55 @@ object SingBoxService {
         put("server", server)
         put("server_port", port)
         put("uuid", uuid)
-        if (!flow.isNullOrBlank()) put("flow", flow)
+        if (!flow.isNullOrBlank()) {
+          put("flow", flow)
+        }
+        put("packet_encoding", "xudp")
 
-        if (security.equals("reality", ignoreCase = true)) {
+        if (security == "reality") {
           put("tls", JSONObject().apply {
             put("enabled", true)
             put("server_name", sni)
-            put("utls", JSONObject().put("enabled", true).put("fingerprint", fp))
+            put("utls", JSONObject().apply {
+              put("enabled", true)
+              put("fingerprint", fp)
+            })
             put("reality", JSONObject().apply {
               put("enabled", true)
               if (pbk.isNotBlank()) put("public_key", pbk)
               if (sid.isNotBlank()) put("short_id", sid)
             })
           })
+        } else if (security == "tls") {
+          put("tls", JSONObject().apply {
+            put("enabled", true)
+            put("server_name", sni)
+            put("utls", JSONObject().apply {
+              put("enabled", true)
+              put("fingerprint", fp)
+            })
+          })
+        }
+
+        if (type == "ws") {
+          put("transport", JSONObject().apply {
+            put("type", "ws")
+            put("path", path)
+            put("headers", JSONObject().apply {
+              put("Host", host)
+            })
+          })
+        } else if (type == "grpc") {
+          put("transport", JSONObject().apply {
+            put("type", "grpc")
+            if (serviceName.isNotBlank()) {
+              put("service_name", serviceName)
+            }
+          })
         }
       }
     } catch (e: Exception) {
-      Log.e(TAG, "Error parsing VLESS: ${e.message}")
+      Log.e(TAG, "Error parsing VLESS URI: ${e.message}")
       null
     }
   }
