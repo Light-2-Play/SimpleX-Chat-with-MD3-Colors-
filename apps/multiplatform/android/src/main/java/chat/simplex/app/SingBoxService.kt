@@ -178,13 +178,10 @@ object SingBoxService {
 
           if (checkSuccess) {
             showToast(context, "Proxy connected & verified ($LOCAL_PORT)")
-            // Принудительно запускаем переподключение серверов SimpleX
-            Handler(Looper.getMainLooper()).post {
-              try {
-                ChatModel.controller.reconnectRemoteHosts()
-              } catch (e: Throwable) {
-                Log.w(TAG, "Failed to reconnect remote hosts: ${e.message}")
-              }
+          } else {
+            val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
+            showToast(context, "Proxy open, but test failed: $checkError$logInfo")
+          }
             }
           } else {
             val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
@@ -216,9 +213,6 @@ object SingBoxService {
     isRunning = false
     Handler(Looper.getMainLooper()).post {
       ByeDpiBridge.isRunning.value = false
-      try {
-        ChatModel.controller.reconnectRemoteHosts()
-      } catch (_: Throwable) {}
     }
   }
 
