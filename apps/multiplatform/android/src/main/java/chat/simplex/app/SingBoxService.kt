@@ -7,12 +7,14 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
+import chat.simplex.common.model.ChatModel
 import chat.simplex.common.views.chatlist.ByeDpiBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -21,7 +23,6 @@ import kotlin.concurrent.thread
 object SingBoxService {
 
   private const val TAG = "SingBoxService"
-  // Важно: порт должен совпадать с тем, что указано в настройках SimpleX (Settings -> Network -> SOCKS-proxy)
   private const val LOCAL_PORT = 20808
   private var process: Process? = null
 
@@ -154,7 +155,41 @@ object SingBoxService {
           Handler(Looper.getMainLooper()).post {
             ByeDpiBridge.isRunning.value = true
           }
-          showToast(context, "Proxy connected ($LOCAL_PORT)")
+
+          // Проверяем прохождение реального трафика через локальный SOCKS5
+          var checkSuccess = false
+          var checkError = ""
+          try {
+            val socksProxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", LOCAL_PORT))
+            val testConn = (URL("http://connectivitycheck.gstatic.com/generate_204").openConnection(socksProxy) as HttpURLConnection).apply {
+              connectTimeout = 4000
+              readTimeout = 4000
+              instanceFollowRedirects = true
+            }
+            val code = testConn.responseCode
+            if (code == 204 || code == 200) {
+              checkSuccess = true
+            } else {
+              checkError = "HTTP $code"
+            }
+          } catch (e: Exception) {
+            checkError = e.message ?: "Connection error"
+          }
+
+          if (checkSuccess) {
+            showToast(context, "Proxy connected & verified ($LOCAL_PORT)")
+            // Принудительно запускаем переподключение серверов SimpleX
+            Handler(Looper.getMainLooper()).post {
+              try {
+                ChatModel.controller.reconnectRemoteHosts()
+              } catch (e: Throwable) {
+                Log.w(TAG, "Failed to reconnect remote hosts: ${e.message}")
+              }
+            }
+          } else {
+            val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
+            showToast(context, "Proxy open, but test failed: $checkError$logInfo")
+          }
         } else {
           val errorDetail = if (!proc.isAlive) {
             val exitCode = proc.exitValue()
@@ -181,6 +216,9 @@ object SingBoxService {
     isRunning = false
     Handler(Looper.getMainLooper()).post {
       ByeDpiBridge.isRunning.value = false
+      try {
+        ChatModel.controller.reconnectRemoteHosts()
+      } catch (_: Throwable) {}
     }
   }
 
@@ -201,12 +239,17 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // Системный DNS устройства (не блокируется операторами в РФ)
+    // Системный DNS устройства + резервный публичный DNS
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
         put(JSONObject().apply {
           put("tag", "local-dns")
           put("address", "local")
+          put("detour", "direct")
+        })
+        put(JSONObject().apply {
+          put("tag", "remote-dns")
+          put("address", "77.88.8.8")
           put("detour", "direct")
         })
       }
@@ -239,7 +282,7 @@ object SingBoxService {
             break
           }
         } catch (e: Exception) {
-          Log.w(TAG, "Failed to download $url: ${e.message}")
+          Log.w(TAG, "Failed to download subscription from $url: ${e.message}")
         }
       }
 
@@ -308,14 +351,17 @@ object SingBoxService {
 
     for ((index, ob) in selected.withIndex()) {
       var tag = ob.optString("tag").ifBlank { "proxy" }
-      if (usedTags.contains(tag) || tag == "direct" || tag == "auto") {
-        tag = "${tag}_$index"
+      val cleanTag = "proxy_" + tag.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.takeIf { it.isNotBlank() }?.take(15) ?: index.toString()
+      val uniqueTag = if (usedTags.contains(cleanTag) || cleanTag == "direct" || cleanTag == "auto") {
+        "${cleanTag}_$index"
+      } else {
+        cleanTag
       }
-      usedTags.add(tag)
-      ob.put("tag", tag)
+      usedTags.add(uniqueTag)
+      ob.put("tag", uniqueTag)
 
       cleanOutbounds.put(ob)
-      proxyTags.put(tag)
+      proxyTags.put(uniqueTag)
     }
 
     return if (proxyTags.length() > 1) {
@@ -323,7 +369,6 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        // Официальный эндпоинт проверки сети Android Google (не блокируется операторами)
         put("url", "http://connectivitycheck.gstatic.com/generate_204")
         put("interval", "2m")
         put("tolerance", 50)
@@ -347,7 +392,6 @@ object SingBoxService {
       }
     } catch (_: Exception) {}
 
-    // Если это ссылка на HTTP-подписку, скачиваем её
     val content = if (input.startsWith("http://", ignoreCase = true) || input.startsWith("https://", ignoreCase = true)) {
       try {
         val downloaded = downloadUrl(input)
@@ -432,7 +476,7 @@ object SingBoxService {
       val rawFragment = uri.fragment
       val tag = if (!rawFragment.isNullOrBlank()) {
         try { java.net.URLDecoder.decode(rawFragment, "UTF-8") } catch (_: Exception) { rawFragment }
-      } else "vless-proxy"
+      } else "custom-proxy"
 
       JSONObject().apply {
         put("type", "vless")
@@ -443,7 +487,6 @@ object SingBoxService {
         if (!flow.isNullOrBlank()) {
           put("flow", flow)
         }
-        put("packet_encoding", "xudp")
 
         if (security == "reality") {
           put("tls", JSONObject().apply {
