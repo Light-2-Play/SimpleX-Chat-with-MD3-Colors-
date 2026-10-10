@@ -13,6 +13,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
 import java.net.URL
 import java.net.URLDecoder
@@ -154,7 +155,37 @@ object SingBoxService {
           Handler(Looper.getMainLooper()).post {
             ByeDpiBridge.isRunning.value = true
           }
-          showToast(context, "Proxy connected ($LOCAL_PORT)")
+
+          // Проверка реального прохождения трафика через SOCKS5
+          var verified = false
+          var testError = ""
+          for (attempt in 1..4) {
+            Thread.sleep(600)
+            try {
+              val socksProxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", LOCAL_PORT))
+              val conn = (URL("https://connectivitycheck.gstatic.com/generate_204").openConnection(socksProxy) as HttpURLConnection).apply {
+                connectTimeout = 4000
+                readTimeout = 4000
+                instanceFollowRedirects = true
+              }
+              val code = conn.responseCode
+              if (code in 200..299) {
+                verified = true
+                break
+              } else {
+                testError = "HTTP $code"
+              }
+            } catch (e: Exception) {
+              testError = e.message ?: "timeout"
+            }
+          }
+
+          if (verified) {
+            showToast(context, "Proxy connected & verified ($LOCAL_PORT)")
+          } else {
+            val logNote = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
+            showToast(context, "Proxy open, but test failed: $testError$logNote")
+          }
         } else {
           val errorDetail = if (!proc.isAlive) {
             val exitCode = proc.exitValue()
@@ -204,7 +235,6 @@ object SingBoxService {
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
-    // 1. Формирование исходящих подключений и получение targetTag
     if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
       val rawKey = getCustomKey(context)
       val parsedOutbounds = resolveCustomOutbounds(rawKey)
@@ -250,36 +280,25 @@ object SingBoxService {
       put("type", "direct")
       put("tag", "direct")
     })
-    cleanOutbounds.put(JSONObject().apply {
-      put("type", "dns")
-      put("tag", "dns-out")
-    })
 
     root.put("outbounds", cleanOutbounds)
 
-    // 2. DNS: Quad9, Cloudflare и Google (DoH через туннель + прямой bootstrap)
+    // Прямой DNS без круговых зависимостей (detour: direct)
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
-        if (targetTag != "direct") {
-          put(JSONObject().apply {
-            put("tag", "quad9-doh")
-            put("address", "https://9.9.9.9/dns-query")
-            put("detour", targetTag)
-          })
-          put(JSONObject().apply {
-            put("tag", "cf-doh")
-            put("address", "https://1.1.1.1/dns-query")
-            put("detour", targetTag)
-          })
-          put(JSONObject().apply {
-            put("tag", "google-doh")
-            put("address", "https://8.8.8.8/dns-query")
-            put("detour", targetTag)
-          })
-        }
         put(JSONObject().apply {
-          put("tag", "bootstrap-quad9")
-          put("address", "9.9.9.9")
+          put("tag", "cf-doh")
+          put("address", "https://1.1.1.1/dns-query")
+          put("detour", "direct")
+        })
+        put(JSONObject().apply {
+          put("tag", "quad9-doh")
+          put("address", "https://9.9.9.9/dns-query")
+          put("detour", "direct")
+        })
+        put(JSONObject().apply {
+          put("tag", "google-doh")
+          put("address", "https://8.8.8.8/dns-query")
           put("detour", "direct")
         })
         put(JSONObject().apply {
@@ -287,25 +306,14 @@ object SingBoxService {
           put("address", "1.1.1.1")
           put("detour", "direct")
         })
-        put(JSONObject().apply {
-          put("tag", "bootstrap-google")
-          put("address", "8.8.8.8")
-          put("detour", "direct")
-        })
       }
       put("servers", servers)
-      put("final", if (targetTag != "direct") "quad9-doh" else "bootstrap-quad9")
       put("strategy", "prefer_ipv4")
     }
     root.put("dns", dns)
 
-    // 3. Маршрутизация
     val route = JSONObject().apply {
       val rules = JSONArray().apply {
-        put(JSONObject().apply {
-          put("protocol", "dns")
-          put("outbound", "dns-out")
-        })
         put(JSONObject().apply {
           put("inbound", JSONArray().apply { put("socks-in") })
           put("outbound", targetTag)
@@ -357,7 +365,7 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        put("url", "https://www.gstatic.com/generate_204")
+        put("url", "https://connectivitycheck.gstatic.com/generate_204")
         put("interval", "2m")
         put("tolerance", 50)
       }
@@ -418,20 +426,37 @@ object SingBoxService {
     return results
   }
 
-  private fun decodeBase64Safely(input: String): String {
-    if (input.startsWith("vless://", ignoreCase = true) || input.startsWith("{")) {
+ private fun decodeBase64Safely(rawInput: String): String {
+    // 1. Очищаем от BOM и внешних пробелов
+    var input = rawInput.trim().removePrefix("\uFEFF")
+
+    // Если это уже явная ссылка vless:// или готовый JSON — декодирование не требуется
+    if (input.startsWith("vless://", ignoreCase = true) || 
+        (input.startsWith("{") && input.contains("\"outbounds\""))) {
       return input
     }
+
+    // 2. Убираем все пробельные символы, переносы \r и \n внутри строки
+    var clean = input.replace("\\s".toRegex(), "")
+
+    // 3. Восстанавливаем недостающий padding '=' до кратности 4
+    val remainder = clean.length % 4
+    if (remainder != 0) {
+      clean += "=".repeat(4 - remainder)
+    }
+
     return try {
-      val clean = input.replace("\r", "").replace("\n", "").trim()
+      // Поддерживаем как стандартный Base64, так и URL_SAFE (где '-' и '_' вместо '+' и '/')
       val decodedBytes = Base64.decode(clean, Base64.DEFAULT or Base64.URL_SAFE)
-      val decoded = String(decodedBytes, StandardCharsets.UTF_8).trim()
+      val decoded = String(decodedBytes, StandardCharsets.UTF_8).trim().removePrefix("\uFEFF")
+
       if (decoded.contains("vless://", ignoreCase = true) || decoded.startsWith("{")) {
         decoded
       } else {
         input
       }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+      Log.w(TAG, "Base64 decode failed: ${e.message}")
       input
     }
   }
