@@ -175,12 +175,14 @@ object SingBoxService {
     isRunning = false
   }
 
-  private fun prepareConfig(context: Context): File {
+ private fun prepareConfig(context: Context): File {
     val configFile = File(context.filesDir, "singbox_active.json")
     val root = JSONObject()
 
+    // Включаем info-логи, чтобы видеть реальные ошибки соединения
     root.put("log", JSONObject().apply {
-      put("level", "warn")
+      put("level", "info")
+      put("timestamp", true)
     })
 
     val socksInbound = JSONObject().apply {
@@ -191,6 +193,9 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
+    // УДАЛЕН БЛОК DNS (9.9.9.9 / 8.8.8.8)
+    // Без него Sing-Box резолвит адреса через системный DNS устройства без блокировок ТСПУ
+
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
@@ -200,7 +205,7 @@ object SingBoxService {
         if (customOutbounds.isNotEmpty()) {
           targetTag = registerOutboundsWithUrlTest(cleanOutbounds, customOutbounds, context)
         } else {
-          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
+          throw IllegalArgumentException("No valid VLESS servers found in custom configuration")
         }
       } catch (e: Exception) {
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
@@ -240,7 +245,6 @@ object SingBoxService {
         }
       }
 
-      // В приоритете всегда берем VLESS серверы
       val candidateOutbounds = if (vlessOutbounds.isNotEmpty()) vlessOutbounds else otherOutbounds
       targetTag = registerOutboundsWithUrlTest(cleanOutbounds, candidateOutbounds, context)
     }
@@ -264,11 +268,10 @@ object SingBoxService {
     }
     root.put("route", route)
 
-    // Принудительно перезаписываем активный конфиг
     configFile.writeText(root.toString(2))
     return configFile
   }
-
+ 
   private fun registerOutboundsWithUrlTest(
     cleanOutbounds: JSONArray,
     rawOutbounds: List<JSONObject>,
@@ -301,7 +304,14 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        put("url", "https://www.gstatic.com/generate_204")
+        
+        // Штатный чекер Android от Google:
+        // 1. Не трогается операторами связи в РФ, чтобы не ломать сетевой статус Android
+        // 2. HTTP без TLS исключает ошибки проверки сертификатов и фильтрацию по SNI
+        put("url", "http://connectivitycheck.gstatic.com/generate_204")
+        // Альтернативный вариант Google:
+        // put("url", "http://www.google.com/generate_204")
+
         put("interval", "1m")
         put("tolerance", 50)
       }
@@ -313,7 +323,7 @@ object SingBoxService {
       "direct"
     }
   }
-
+  
   private fun resolveCustomOutbounds(rawInput: String): List<JSONObject> {
     var input = rawInput.trim().removeSurrounding("\"").removeSurrounding("'")
 
