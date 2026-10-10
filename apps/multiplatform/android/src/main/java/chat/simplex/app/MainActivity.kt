@@ -502,7 +502,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
               Text("Back", fontWeight = FontWeight.SemiBold)
             }
             Spacer(modifier = Modifier.width(8.dp))
-Button(
+            Button(
               onClick = {
                 val key = customKey.trim()
                 if (key.isNotEmpty()) {
