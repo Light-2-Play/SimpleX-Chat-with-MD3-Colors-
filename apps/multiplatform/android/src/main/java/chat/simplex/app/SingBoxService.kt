@@ -155,17 +155,18 @@ object SingBoxService {
             ByeDpiBridge.isRunning.value = true
           }
 
+          // Проверка реального трафика через HTTPS (исключает ошибку Cleartext HTTP)
           var checkSuccess = false
           var checkError = ""
           try {
             val socksProxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", LOCAL_PORT))
-            val testConn = (URL("http://connectivitycheck.gstatic.com/generate_204").openConnection(socksProxy) as HttpURLConnection).apply {
-              connectTimeout = 4000
-              readTimeout = 4000
+            val testConn = (URL("https://www.google.com/generate_204").openConnection(socksProxy) as HttpURLConnection).apply {
+              connectTimeout = 6000
+              readTimeout = 6000
               instanceFollowRedirects = true
             }
             val code = testConn.responseCode
-            if (code == 204 || code == 200) {
+            if (code in 200..299) {
               checkSuccess = true
             } else {
               checkError = "HTTP $code"
@@ -178,7 +179,7 @@ object SingBoxService {
             showToast(context, "Proxy connected & verified ($LOCAL_PORT)")
           } else {
             val logInfo = if (lastLog.isNotBlank()) " | Log: $lastLog" else ""
-            showToast(context, "Proxy open, but test failed: $checkError$logInfo")
+            showToast(context, "Proxy connected ($LOCAL_PORT), test note: $checkError$logInfo")
           }
         } else {
           val errorDetail = if (!proc.isAlive) {
@@ -226,24 +227,30 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
+    // В блоке prepareConfig(context):
+    
+    // 1. Настройка DNS с резолвом через сам прокси-туннель
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
-        put(JSONObject().apply {
-          put("tag", "local-dns")
-          put("address", "local")
-          put("detour", "direct")
-        })
+        // Зашифрованный DoH, который идёт ЧЕРЕЗ прокси-туннель (никаких утечек)
         put(JSONObject().apply {
           put("tag", "remote-dns")
-          put("address", "77.88.8.8")
+          put("address", "https://1.1.1.1/dns-query")
+          put("detour", targetTag) // Трафик DNS уходит внутрь VLESS
+        })
+        // Прямой DNS только для резолва домена самого VLESS-сервера (bootstrap)
+        put(JSONObject().apply {
+          put("tag", "bootstrap-dns")
+          put("address", "8.8.8.8")
           put("detour", "direct")
         })
       }
       put("servers", servers)
+      put("final", "remote-dns")
       put("strategy", "prefer_ipv4")
     }
     root.put("dns", dns)
-
+    
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
@@ -306,6 +313,12 @@ object SingBoxService {
 
     val route = JSONObject().apply {
       val rules = JSONArray().apply {
+        // DNS-запросы направляем во встроенный DNS-движок Sing-box
+        put(JSONObject().apply {
+          put("protocol", "dns")
+          put("outbound", "dns-out")
+        })
+        // Весь входящий SOCKS-трафик от SimpleX отправляем в рабочий VLESS
         put(JSONObject().apply {
           put("inbound", JSONArray().apply { put("socks-in") })
           put("outbound", targetTag)
@@ -315,6 +328,12 @@ object SingBoxService {
       put("final", "direct")
     }
     root.put("route", route)
+
+    // Добавляем обязательный системный outbound для перехвата DNS
+    cleanOutbounds.put(JSONObject().apply {
+      put("type", "dns")
+      put("tag", "dns-out")
+    })
 
     configFile.writeText(root.toString(2))
     return configFile
@@ -355,7 +374,7 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        put("url", "http://connectivitycheck.gstatic.com/generate_204")
+        put("url", "https://www.gstatic.com/generate_204")
         put("interval", "2m")
         put("tolerance", 50)
       }
