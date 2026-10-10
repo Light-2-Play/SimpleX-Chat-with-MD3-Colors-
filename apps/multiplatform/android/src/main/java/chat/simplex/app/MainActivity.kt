@@ -45,7 +45,6 @@ import chat.simplex.common.views.chat.item.LocalVoiceTranscriptionWidget
 import chat.simplex.app.ai.VoiceTranscriptionBox
 import androidx.compose.runtime.CompositionLocalProvider
 
-// Global state for compose dialogs
 var showSingBoxDialogState = mutableStateOf(false)
 var openByeDpiDialog: (() -> Unit)? = null
 
@@ -61,10 +60,10 @@ class MainActivity: FragmentActivity() {
     openByeDpiDialog = {
       showSingBoxDialogState.value = true
     }
-    ByeDpiBridge.showDialog = {
+    chat.simplex.common.views.chatlist.ByeDpiBridge.showDialog = {
       showSingBoxDialogState.value = true
     }
-    ByeDpiBridge.isRunning.value = SingBoxService.isRunning
+    chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = SingBoxService.isRunning
 
     MediaQualityManager.init(applicationContext)
 
@@ -143,20 +142,20 @@ class MainActivity: FragmentActivity() {
     setContent {
       CompositionLocalProvider(
         LocalVoiceTranscriptionWidget provides { cItem ->
-            val fileMeta = cItem.file
-            val fileSource = if (fileMeta != null) getLoadedFileSource(fileMeta) else null
-            if (fileSource != null) {
-                chat.simplex.app.ai.VoiceTranscriptionBox(
-                    fileSource = fileSource,
-                    isSent = cItem.chatDir.sent,
-                    modifier = androidx.compose.ui.Modifier.padding(
-                        start = if (cItem.chatDir.sent) 8.dp else 12.dp,
-                        end = if (cItem.chatDir.sent) 12.dp else 8.dp,
-                        top = 2.dp,
-                        bottom = 4.dp
-                    )
-                )
-            }
+          val fileMeta = cItem.file
+          val fileSource = if (fileMeta != null) getLoadedFileSource(fileMeta) else null
+          if (fileSource != null) {
+            chat.simplex.app.ai.VoiceTranscriptionBox(
+              fileSource = fileSource,
+              isSent = cItem.chatDir.sent,
+              modifier = androidx.compose.ui.Modifier.padding(
+                start = if (cItem.chatDir.sent) 8.dp else 12.dp,
+                end = if (cItem.chatDir.sent) 12.dp else 8.dp,
+                top = 2.dp,
+                bottom = 4.dp
+              )
+            )
+          }
         }
       ) {
         SingBoxComposeDialogs(this@MainActivity)
@@ -177,7 +176,7 @@ class MainActivity: FragmentActivity() {
   override fun onResume() {
     super.onResume()
     AppLock.recheckAuthState()
-    ByeDpiBridge.isRunning.value = SingBoxService.isRunning
+    chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = SingBoxService.isRunning
   }
 
   override fun onPause() {
@@ -198,10 +197,10 @@ class MainActivity: FragmentActivity() {
 
   override fun onBackPressed() {
     val canFinishActivity = (
-        onBackPressedDispatcher.hasEnabledCallbacks()
-            || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-            || isTaskRoot 
-        ) && SimplexApp.context.chatModel.sharedContent.value !is SharedContent.Forward
+      onBackPressedDispatcher.hasEnabledCallbacks()
+        || Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        || isTaskRoot 
+    ) && SimplexApp.context.chatModel.sharedContent.value !is SharedContent.Forward
     if (canFinishActivity) {
       super.onBackPressed()
     }
@@ -227,75 +226,75 @@ class MainActivity: FragmentActivity() {
 // MONET COLORS FOR SINGBOX DIALOG
 // =====================================================================
 data class DirectMonetColors(
-    val surface: Color,
-    val background: Color,
-    val onSurface: Color,
-    val onSurfaceVariant: Color,
-    val primary: Color,
-    val onPrimary: Color,
-    val primaryContainer: Color,
-    val onPrimaryContainer: Color,
-    val outline: Color
+  val surface: Color,
+  val background: Color,
+  val onSurface: Color,
+  val onSurfaceVariant: Color,
+  val primary: Color,
+  val onPrimary: Color,
+  val primaryContainer: Color,
+  val onPrimaryContainer: Color,
+  val outline: Color
 )
 
 @Composable
 fun rememberDirectMonetColors(context: android.content.Context = androidx.compose.ui.platform.LocalContext.current): DirectMonetColors {
-    val isLight = CurrentColors.value.colors.isLight
-    return remember(isLight) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (isLight) {
-                DirectMonetColors(
-                    surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_50)),
-                    background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
-                    onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
-                    onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_700)),
-                    primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_600)),
-                    onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_0)),
-                    primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
-                    onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
-                    outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_500)).copy(alpha = 0.5f)
-                )
-            } else {
-                DirectMonetColors(
-                    surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_800)),
-                    background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
-                    onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
-                    onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_200)),
-                    primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_200)),
-                    onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
-                    primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_700)).copy(alpha = 0.45f),
-                    onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
-                    outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_400)).copy(alpha = 0.5f)
-                )
-            }
-        } else {
-            if (isLight) {
-                DirectMonetColors(
-                    surface = Color.White,
-                    background = Color(0xFFF5F5F5),
-                    onSurface = Color.Black,
-                    onSurfaceVariant = Color.DarkGray,
-                    primary = Color(0xFF6750A4),
-                    onPrimary = Color.White,
-                    primaryContainer = Color(0xFFEADDFF),
-                    onPrimaryContainer = Color(0xFF21005D),
-                    outline = Color.Gray
-                )
-            } else {
-                DirectMonetColors(
-                    surface = Color(0xFF1E1E1E),
-                    background = Color(0xFF121212),
-                    onSurface = Color.White,
-                    onSurfaceVariant = Color.LightGray,
-                    primary = Color(0xFFA8C7FA),
-                    onPrimary = Color.Black,
-                    primaryContainer = Color(0xFF004A77),
-                    onPrimaryContainer = Color(0xFFC2E7FF),
-                    outline = Color.Gray
-                )
-            }
-        }
+  val isLight = CurrentColors.value.colors.isLight
+  return remember(isLight) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      if (isLight) {
+        DirectMonetColors(
+          surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_50)),
+          background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
+          onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
+          onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_700)),
+          primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_600)),
+          onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_0)),
+          primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
+          onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
+          outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_500)).copy(alpha = 0.5f)
+        )
+      } else {
+        DirectMonetColors(
+          surface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_800)),
+          background = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_900)),
+          onSurface = Color(ContextCompat.getColor(context, android.R.color.system_neutral1_100)),
+          onSurfaceVariant = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_200)),
+          primary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_200)),
+          onPrimary = Color(ContextCompat.getColor(context, android.R.color.system_accent1_900)),
+          primaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_700)).copy(alpha = 0.45f),
+          onPrimaryContainer = Color(ContextCompat.getColor(context, android.R.color.system_accent1_100)),
+          outline = Color(ContextCompat.getColor(context, android.R.color.system_neutral2_400)).copy(alpha = 0.5f)
+        )
+      }
+    } else {
+      if (isLight) {
+        DirectMonetColors(
+          surface = Color.White,
+          background = Color(0xFFF5F5F5),
+          onSurface = Color.Black,
+          onSurfaceVariant = Color.DarkGray,
+          primary = Color(0xFF6750A4),
+          onPrimary = Color.White,
+          primaryContainer = Color(0xFFEADDFF),
+          onPrimaryContainer = Color(0xFF21005D),
+          outline = Color.Gray
+        )
+      } else {
+        DirectMonetColors(
+          surface = Color(0xFF1E1E1E),
+          background = Color(0xFF121212),
+          onSurface = Color.White,
+          onSurfaceVariant = Color.LightGray,
+          primary = Color(0xFFA8C7FA),
+          onPrimary = Color.Black,
+          primaryContainer = Color(0xFF004A77),
+          onPrimaryContainer = Color(0xFFC2E7FF),
+          outline = Color.Gray
+        )
+      }
     }
+  }
 }
 
 // =====================================================================
@@ -303,233 +302,233 @@ fun rememberDirectMonetColors(context: android.content.Context = androidx.compos
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
-    if (!showSingBoxDialogState.value) return
+  if (!showSingBoxDialogState.value) return
 
-    val monet = rememberDirectMonetColors(activity)
-    var showCustomInputDialog by remember { mutableStateOf(false) }
+  val monet = rememberDirectMonetColors(activity)
+  var showCustomInputDialog by remember { mutableStateOf(false) }
 
-    if (!showCustomInputDialog) {
-        Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = monet.surface,
-                elevation = 6.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+  if (!showCustomInputDialog) {
+    Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
+      Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = monet.surface,
+        elevation = 6.dp,
+        modifier = Modifier
+          .fillMaxWidth()
+          .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+      ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+          val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
+          val isRunning = SingBoxService.isRunning
+          val statusText = if (isRunning) "● VLESS active ($modeLabel)" else "○ VLESS disabled"
+
+          Text(
+            text = "VLESS Proxy Settings",
+            color = monet.onSurface,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = statusText,
+            color = if (isRunning) monet.primary else monet.onSurfaceVariant,
+            fontSize = 14.sp
+          )
+
+          Spacer(modifier = Modifier.height(16.dp))
+
+          val limits = listOf(25, 50, 100, 0, -1)
+          val options = listOf(
+            "25 Servers (Lite)",
+            "50 Servers (Mid)",
+            "100 Servers (High)",
+            "All available (Ultra)",
+            "Custom VLESS / Subscription"
+          )
+
+          var selectedIndex by remember {
+            val isCustom = SingBoxService.isCustomMode(activity)
+            val curLim = SingBoxService.getServerLimit(activity)
+            mutableStateOf(if (isCustom) 4 else {
+              val idx = limits.indexOf(curLim)
+              if (idx == -1) 0 else idx
+            })
+          }
+
+          options.forEachIndexed { index, text ->
+            val isSelected = selectedIndex == index
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isSelected) monet.primaryContainer else Color.Transparent)
+                .clickable { selectedIndex = index }
+                .padding(vertical = 12.dp, horizontal = 12.dp),
+              verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    val modeLabel = if (SingBoxService.isCustomMode(activity)) "Custom VLESS" else "Auto Selection"
-                    val isRunning = SingBoxService.isRunning
-                    val statusText = if (isRunning) "● VLESS active ($modeLabel)" else "○ VLESS disabled"
-
-                    Text(
-                        text = "VLESS Proxy Settings",
-                        color = monet.onSurface,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = statusText,
-                        color = if (isRunning) monet.primary else monet.onSurfaceVariant,
-                        fontSize = 14.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val limits = listOf(25, 50, 100, 0, -1)
-                    val options = listOf(
-                        "25 Servers (Lite)",
-                        "50 Servers (Mid)",
-                        "100 Servers (High)",
-                        "All available (Ultra)",
-                        "Custom VLESS / Subscription"
-                    )
-
-                    var selectedIndex by remember {
-                        val isCustom = SingBoxService.isCustomMode(activity)
-                        val curLim = SingBoxService.getServerLimit(activity)
-                        mutableStateOf(if (isCustom) 4 else {
-                            val idx = limits.indexOf(curLim)
-                            if (idx == -1) 0 else idx
-                        })
-                    }
-
-                    options.forEachIndexed { index, text ->
-                        val isSelected = selectedIndex == index
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (isSelected) monet.primaryContainer else Color.Transparent)
-                                .clickable { selectedIndex = index }
-                                .padding(vertical = 12.dp, horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .border(
-                                        width = 2.dp,
-                                        color = if (isSelected) monet.primary else monet.outline,
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isSelected) {
-                                    Box(modifier = Modifier.size(10.dp).background(monet.primary, CircleShape))
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Text(
-                                text = text,
-                                color = if (isSelected) monet.onPrimaryContainer else monet.onSurface,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                fontSize = 15.sp
-                            )
-                        }
-                        if (index < options.lastIndex) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = { 
-                                SingBoxService.stop()
-                                ByeDpiBridge.isRunning.value = false
-                                showSingBoxDialogState.value = false 
-                            },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
-                        ) {
-                            Text("Disable", fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        TextButton(
-                            onClick = { showSingBoxDialogState.value = false },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
-                        ) {
-                            Text("Cancel", fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (selectedIndex == 4) {
-                                    showCustomInputDialog = true
-                                } else {
-                                    SingBoxService.setCustomMode(activity, false)
-                                    SingBoxService.setServerLimit(activity, limits[selectedIndex])
-                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
-                                    else SingBoxService.start(activity)
-                                    ByeDpiBridge.isRunning.value = true
-                                    showSingBoxDialogState.value = false
-                                }
-                            },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                backgroundColor = monet.primary,
-                                contentColor = monet.onPrimary
-                            ),
-                            elevation = ButtonDefaults.elevation(0.dp, 0.dp)
-                        ) {
-                            Text(if (isRunning) "Apply" else "Turn On", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        Dialog(onDismissRequest = { showCustomInputDialog = false }) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = monet.surface,
-                elevation = 6.dp,
+              Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text(
-                        text = "Custom VLESS or link",
-                        color = monet.onSurface,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    var customKey by remember { mutableStateOf(SingBoxService.getCustomKey(activity)) }
-
-                    TextField(
-                        value = customKey,
-                        onValueChange = { customKey = it },
-                        placeholder = { Text("vless://... or http://...", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
-                        colors = TextFieldDefaults.textFieldColors(
-                            textColor = monet.onSurface,
-                            placeholderColor = monet.onSurfaceVariant.copy(alpha = 0.6f),
-                            backgroundColor = monet.background,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            cursorColor = monet.primary
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(1.dp, monet.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
-                        maxLines = 5
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = { showCustomInputDialog = false },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
-                        ) {
-                            Text("Back", fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                val key = customKey.trim()
-                                if (key.isNotEmpty()) {
-                                    SingBoxService.setCustomMode(activity, true)
-                                    SingBoxService.setCustomKey(activity, key)
-                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
-                                    else SingBoxService.start(activity)
-                                    ByeDpiBridge.isRunning.value = true
-                                    showCustomInputDialog = false
-                                    showSingBoxDialogState.value = false
-                                }
-                            },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                backgroundColor = monet.primary,
-                                contentColor = monet.onPrimary
-                            ),
-                            elevation = ButtonDefaults.elevation(0.dp, 0.dp)
-                        ) {
-                            Text("Connect", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                  .size(20.dp)
+                  .border(
+                    width = 2.dp,
+                    color = if (isSelected) monet.primary else monet.outline,
+                    shape = CircleShape
+                  ),
+                contentAlignment = Alignment.Center
+              ) {
+                if (isSelected) {
+                  Box(modifier = Modifier.size(10.dp).background(monet.primary, CircleShape))
                 }
+              }
+              Spacer(modifier = Modifier.width(14.dp))
+              Text(
+                text = text,
+                color = if (isSelected) monet.onPrimaryContainer else monet.onSurface,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                fontSize = 15.sp
+              )
             }
+            if (index < options.lastIndex) {
+              Spacer(modifier = Modifier.height(2.dp))
+            }
+          }
+
+          Spacer(modifier = Modifier.height(24.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            TextButton(
+              onClick = { 
+                SingBoxService.stop()
+                chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = false
+                showSingBoxDialogState.value = false 
+              },
+              shape = CircleShape,
+              colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
+            ) {
+              Text("Disable", fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            TextButton(
+              onClick = { showSingBoxDialogState.value = false },
+              shape = CircleShape,
+              colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
+            ) {
+              Text("Cancel", fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+              onClick = {
+                if (selectedIndex == 4) {
+                  showCustomInputDialog = true
+                } else {
+                  SingBoxService.setCustomMode(activity, false)
+                  SingBoxService.setServerLimit(activity, limits[selectedIndex])
+                  if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                  else SingBoxService.start(activity)
+                  chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = true
+                  showSingBoxDialogState.value = false
+                }
+              },
+              shape = CircleShape,
+              colors = ButtonDefaults.buttonColors(
+                backgroundColor = monet.primary,
+                contentColor = monet.onPrimary
+              ),
+              elevation = ButtonDefaults.elevation(0.dp, 0.dp)
+            ) {
+              Text(if (isRunning) "Apply" else "Turn On", fontWeight = FontWeight.SemiBold)
+            }
+          }
         }
+      }
     }
+  } else {
+    Dialog(onDismissRequest = { showCustomInputDialog = false }) {
+      Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = monet.surface,
+        elevation = 6.dp,
+        modifier = Modifier
+          .fillMaxWidth()
+          .border(1.dp, monet.outline.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+      ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+          Text(
+            text = "Custom VLESS or link",
+            color = monet.onSurface,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+          )
+          Spacer(modifier = Modifier.height(16.dp))
+
+          var customKey by remember { mutableStateOf(SingBoxService.getCustomKey(activity)) }
+
+          TextField(
+            value = customKey,
+            onValueChange = { customKey = it },
+            placeholder = { Text("vless://... or http://...", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
+            colors = TextFieldDefaults.textFieldColors(
+              textColor = monet.onSurface,
+              placeholderColor = monet.onSurfaceVariant.copy(alpha = 0.6f),
+              backgroundColor = monet.background,
+              focusedIndicatorColor = Color.Transparent,
+              unfocusedIndicatorColor = Color.Transparent,
+              cursorColor = monet.primary
+            ),
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(120.dp)
+              .clip(RoundedCornerShape(16.dp))
+              .border(1.dp, monet.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
+            maxLines = 5
+          )
+
+          Spacer(modifier = Modifier.height(24.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            TextButton(
+              onClick = { showCustomInputDialog = false },
+              shape = CircleShape,
+              colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
+            ) {
+              Text("Back", fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+              onClick = {
+                val key = customKey.trim()
+                if (key.isNotEmpty()) {
+                  SingBoxService.setCustomMode(activity, true)
+                  SingBoxService.setCustomKey(activity, key)
+                  if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                  else SingBoxService.start(activity)
+                  chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = true
+                  showCustomInputDialog = false
+                  showSingBoxDialogState.value = false
+                }
+              },
+              shape = CircleShape,
+              colors = ButtonDefaults.buttonColors(
+                backgroundColor = monet.primary,
+                contentColor = monet.onPrimary
+              ),
+              elevation = ButtonDefaults.elevation(0.dp, 0.dp)
+            ) {
+              Text("Connect", fontWeight = FontWeight.SemiBold)
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // =====================================================================
