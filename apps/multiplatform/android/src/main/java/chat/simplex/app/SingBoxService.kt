@@ -22,9 +22,10 @@ object SingBoxService {
   private const val LOCAL_PORT = 20808
   private var process: Process? = null
 
+  // Зеркала подписок (работающие напрямую без блокировок)
   private val SUBSCRIPTION_URLS = listOf(
-    "https://cdn.jsdelivr.net/gh/Au1rxx/free-vpn-subscriptions@main/output/singbox.json",
     "https://cdn.jsdelivr.net/gh/awesome-vpn/awesome-vpn@master/sing-box.json",
+    "https://cdn.jsdelivr.net/gh/Au1rxx/free-vpn-subscriptions@main/output/singbox.json",
     "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/singbox.json"
   )
 
@@ -190,20 +191,6 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // Системный DNS устройства - не блокируется оператором
-    val dns = JSONObject().apply {
-      val servers = JSONArray().apply {
-        put(JSONObject().apply {
-          put("tag", "local-dns")
-          put("address", "local")
-          put("detour", "direct")
-        })
-      }
-      put("servers", servers)
-      put("strategy", "prefer_ipv4")
-    }
-    root.put("dns", dns)
-
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
@@ -213,7 +200,7 @@ object SingBoxService {
         if (customOutbounds.isNotEmpty()) {
           targetTag = registerOutboundsWithUrlTest(cleanOutbounds, customOutbounds, context)
         } else {
-          throw IllegalArgumentException("No valid VLESS servers found in custom configuration")
+          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
         }
       } catch (e: Exception) {
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
@@ -233,8 +220,8 @@ object SingBoxService {
       }
 
       if (rawJson.isNullOrBlank()) {
-        if (configFile.exists() && configFile.length() > 50) return configFile
-        throw IllegalStateException("Failed to download subscription")
+        if (configFile.exists() && configFile.length() > 100) return configFile
+        throw IllegalStateException("Failed to download subscription. Check internet connection.")
       }
 
       val sourceRoot = JSONObject(rawJson)
@@ -253,7 +240,7 @@ object SingBoxService {
         }
       }
 
-      // Приоритет отдаем VLESS-серверам
+      // В приоритете всегда берем VLESS серверы
       val candidateOutbounds = if (vlessOutbounds.isNotEmpty()) vlessOutbounds else otherOutbounds
       targetTag = registerOutboundsWithUrlTest(cleanOutbounds, candidateOutbounds, context)
     }
@@ -277,11 +264,11 @@ object SingBoxService {
     }
     root.put("route", route)
 
+    // Принудительно перезаписываем активный конфиг
     configFile.writeText(root.toString(2))
     return configFile
   }
 
-  // Сборка группы urltest с гарантированно уникальными тегами для исключения падений
   private fun registerOutboundsWithUrlTest(
     cleanOutbounds: JSONArray,
     rawOutbounds: List<JSONObject>,
