@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
+import chat.simplex.common.views.chatlist.ByeDpiBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -22,7 +23,6 @@ object SingBoxService {
   private const val LOCAL_PORT = 20808
   private var process: Process? = null
 
-  // Зеркала подписок (работающие напрямую без блокировок)
   private val SUBSCRIPTION_URLS = listOf(
     "https://cdn.jsdelivr.net/gh/awesome-vpn/awesome-vpn@master/sing-box.json",
     "https://cdn.jsdelivr.net/gh/Au1rxx/free-vpn-subscriptions@main/output/singbox.json",
@@ -149,6 +149,10 @@ object SingBoxService {
 
         if (portOpen) {
           isRunning = true
+          // Синхронизируем статус с кнопкой Щита в UI
+          Handler(Looper.getMainLooper()).post {
+            ByeDpiBridge.isRunning.value = true
+          }
           showToast(context, "Proxy connected ($LOCAL_PORT)")
         } else {
           val errorDetail = if (!proc.isAlive) {
@@ -162,6 +166,7 @@ object SingBoxService {
           showToast(context, "Error: $errorDetail")
         }
       } catch (e: Exception) {
+        stop()
         showToast(context, "Failure: ${e.message}")
       }
     }
@@ -173,16 +178,18 @@ object SingBoxService {
       process = null
     } catch (_: Exception) {}
     isRunning = false
+    // Сбрасываем подсветку кнопки Щита в UI
+    Handler(Looper.getMainLooper()).post {
+      ByeDpiBridge.isRunning.value = false
+    }
   }
 
- private fun prepareConfig(context: Context): File {
+  private fun prepareConfig(context: Context): File {
     val configFile = File(context.filesDir, "singbox_active.json")
     val root = JSONObject()
 
-    // Включаем info-логи, чтобы видеть реальные ошибки соединения
     root.put("log", JSONObject().apply {
-      put("level", "info")
-      put("timestamp", true)
+      put("level", "warn")
     })
 
     val socksInbound = JSONObject().apply {
@@ -193,8 +200,19 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // УДАЛЕН БЛОК DNS (9.9.9.9 / 8.8.8.8)
-    // Без него Sing-Box резолвит адреса через системный DNS устройства без блокировок ТСПУ
+    // Системный DNS устройства (не блокируется операторами в РФ)
+    val dns = JSONObject().apply {
+      val servers = JSONArray().apply {
+        put(JSONObject().apply {
+          put("tag", "local-dns")
+          put("address", "local")
+          put("detour", "direct")
+        })
+      }
+      put("servers", servers)
+      put("strategy", "prefer_ipv4")
+    }
+    root.put("dns", dns)
 
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
@@ -205,7 +223,7 @@ object SingBoxService {
         if (customOutbounds.isNotEmpty()) {
           targetTag = registerOutboundsWithUrlTest(cleanOutbounds, customOutbounds, context)
         } else {
-          throw IllegalArgumentException("No valid VLESS servers found in custom configuration")
+          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
         }
       } catch (e: Exception) {
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
@@ -225,8 +243,8 @@ object SingBoxService {
       }
 
       if (rawJson.isNullOrBlank()) {
-        if (configFile.exists() && configFile.length() > 100) return configFile
-        throw IllegalStateException("Failed to download subscription. Check internet connection.")
+        if (configFile.exists() && configFile.length() > 50) return configFile
+        throw IllegalStateException("Failed to download subscription")
       }
 
       val sourceRoot = JSONObject(rawJson)
@@ -271,7 +289,7 @@ object SingBoxService {
     configFile.writeText(root.toString(2))
     return configFile
   }
- 
+
   private fun registerOutboundsWithUrlTest(
     cleanOutbounds: JSONArray,
     rawOutbounds: List<JSONObject>,
@@ -304,15 +322,9 @@ object SingBoxService {
         put("type", "urltest")
         put("tag", "auto")
         put("outbounds", proxyTags)
-        
-        // Штатный чекер Android от Google:
-        // 1. Не трогается операторами связи в РФ, чтобы не ломать сетевой статус Android
-        // 2. HTTP без TLS исключает ошибки проверки сертификатов и фильтрацию по SNI
+        // Официальный эндпоинт проверки сети Android Google (не блокируется операторами)
         put("url", "http://connectivitycheck.gstatic.com/generate_204")
-        // Альтернативный вариант Google:
-        // put("url", "http://www.google.com/generate_204")
-
-        put("interval", "1m")
+        put("interval", "2m")
         put("tolerance", 50)
       }
       cleanOutbounds.put(urlTestGroup)
@@ -323,7 +335,7 @@ object SingBoxService {
       "direct"
     }
   }
-  
+
   private fun resolveCustomOutbounds(rawInput: String): List<JSONObject> {
     var input = rawInput.trim().removeSurrounding("\"").removeSurrounding("'")
 
@@ -353,7 +365,7 @@ object SingBoxService {
 
     val results = mutableListOf<JSONObject>()
 
-    // Если передан JSON со списком outbounds
+    // Если передан JSON с массивом outbounds
     if (content.startsWith("{") && content.contains("\"outbounds\"")) {
       try {
         val json = JSONObject(content)
@@ -368,7 +380,7 @@ object SingBoxService {
       } catch (_: Exception) {}
     }
 
-    // Парсим все строки vless://
+    // Разбор одиночных или многострочных vless://
     for (line in content.lines()) {
       val trimmed = line.trim()
       if (trimmed.startsWith("vless://", ignoreCase = true)) {
