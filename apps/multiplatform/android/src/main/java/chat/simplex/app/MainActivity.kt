@@ -423,13 +423,18 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(
-                            onClick = { SingBoxService.stop(); showSingBoxDialogState.value = false },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
-                        ) {
-                            Text("Disable", fontWeight = FontWeight.SemiBold)
-                        }
+                        // Текст-кнопка "Disable":
+TextButton(
+    onClick = { 
+        SingBoxService.stop()
+        ByeDpiBridge.isRunning.value = false // Синхронизируем щит
+        showSingBoxDialogState.value = false 
+    },
+    shape = CircleShape,
+    colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
+) {
+    Text("Disable", fontWeight = FontWeight.SemiBold)
+}
                         Spacer(modifier = Modifier.width(4.dp))
                         TextButton(
                             onClick = { showSingBoxDialogState.value = false },
@@ -439,18 +444,20 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             Text("Cancel", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (selectedIndex == 4) {
-                                    showCustomInputDialog = true
-                                } else {
-                                    SingBoxService.setCustomMode(activity, false)
-                                    SingBoxService.setServerLimit(activity, limits[selectedIndex])
-                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
-                                    else SingBoxService.start(activity)
-                                    showSingBoxDialogState.value = false
-                                }
-                            },
+                        // Кнопка "Turn On" / "Apply":
+Button(
+    onClick = {
+        if (selectedIndex == 4) {
+            showCustomInputDialog = true
+        } else {
+            SingBoxService.setCustomMode(activity, false)
+            SingBoxService.setServerLimit(activity, limits[selectedIndex])
+            if (SingBoxService.isRunning) SingBoxService.restart(activity)
+            else SingBoxService.start(activity)
+            ByeDpiBridge.isRunning.value = true // Синхронизируем щит
+            showSingBoxDialogState.value = false
+        }
+    },
                             shape = CircleShape, // Овальная Pill-кнопка
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = monet.primary, // Динамический акцент Monet
@@ -525,17 +532,18 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
-                            onClick = {
-                                val key = customKey.trim()
-                                if (key.isNotEmpty()) {
-                                    SingBoxService.setCustomMode(activity, true)
-                                    SingBoxService.setCustomKey(activity, key)
-                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
-                                    else SingBoxService.start(activity)
-                                    showCustomInputDialog = false
-                                    showSingBoxDialogState.value = false
-                                }
-                            },
+    onClick = {
+        val key = customKey.trim()
+        if (key.isNotEmpty()) {
+            SingBoxService.setCustomMode(activity, true)
+            SingBoxService.setCustomKey(activity, key)
+            if (SingBoxService.isRunning) SingBoxService.restart(activity)
+            else SingBoxService.start(activity)
+            ByeDpiBridge.isRunning.value = true // Синхронизируем щит
+            showCustomInputDialog = false
+            showSingBoxDialogState.value = false
+        }
+    },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = monet.primary,
