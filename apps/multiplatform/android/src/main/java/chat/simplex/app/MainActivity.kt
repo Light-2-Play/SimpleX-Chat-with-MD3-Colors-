@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -44,16 +43,10 @@ import java.lang.ref.WeakReference
 import chat.simplex.app.SingBoxService
 import chat.simplex.common.views.chat.item.LocalVoiceTranscriptionWidget
 import chat.simplex.app.ai.VoiceTranscriptionBox
-import chat.simplex.common.platform.getLoadedFilePath
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.foundation.layout.padding
-import chat.simplex.common.platform.getLoadedFileSource
-import chat.simplex.common.platform.MediaQualityManager
-import chat.simplex.common.views.chatlist.ByeDpiBridge
 
-// Глобальное состояние для управления диалогом SingBox из Compose
+// Global state for compose dialogs
 var showSingBoxDialogState = mutableStateOf(false)
-
 var openByeDpiDialog: (() -> Unit)? = null
 
 class MainActivity: FragmentActivity() {
@@ -68,10 +61,10 @@ class MainActivity: FragmentActivity() {
     openByeDpiDialog = {
       showSingBoxDialogState.value = true
     }
-   ByeDpiBridge.showDialog = {
-    showSingBoxDialogState.value = true
-}
-ByeDpiBridge.isRunning.value = SingBoxService.isRunning
+    ByeDpiBridge.showDialog = {
+      showSingBoxDialogState.value = true
+    }
+    ByeDpiBridge.isRunning.value = SingBoxService.isRunning
 
     MediaQualityManager.init(applicationContext)
 
@@ -110,7 +103,7 @@ ByeDpiBridge.isRunning.value = SingBoxService.isRunning
         }
       }
     }
-   
+    
     platform.androidSetNightModeIfSupported()
     val c = CurrentColors.value.colors
     platform.androidSetStatusAndNavigationBarAppearance(c.isLight, c.isLight)
@@ -127,7 +120,6 @@ ByeDpiBridge.isRunning.value = SingBoxService.isRunning
     }
 
     if (ChatController.appPrefs.privacyProtectScreen.get()) {
-      Log.d(TAG, "onCreate: set FLAG_SECURE")
       window.setFlags(
         WindowManager.LayoutParams.FLAG_SECURE,
         WindowManager.LayoutParams.FLAG_SECURE
@@ -148,12 +140,11 @@ ByeDpiBridge.isRunning.value = SingBoxService.isRunning
 
     enableEdgeToEdge()
 
-   setContent {
-    CompositionLocalProvider(
+    setContent {
+      CompositionLocalProvider(
         LocalVoiceTranscriptionWidget provides { cItem ->
             val fileMeta = cItem.file
             val fileSource = if (fileMeta != null) getLoadedFileSource(fileMeta) else null
-            
             if (fileSource != null) {
                 chat.simplex.app.ai.VoiceTranscriptionBox(
                     fileSource = fileSource,
@@ -167,11 +158,11 @@ ByeDpiBridge.isRunning.value = SingBoxService.isRunning
                 )
             }
         }
-    ) {
+      ) {
         SingBoxComposeDialogs(this@MainActivity)
         AppScreen()
+      }
     }
-}
 
     SimplexApp.context.schedulePeriodicServiceRestartWorker()
     SimplexApp.context.schedulePeriodicWakeUp()
@@ -233,7 +224,7 @@ ByeDpiBridge.isRunning.value = SingBoxService.isRunning
 }
 
 // =====================================================================
-// ПРЯМОЕ ИЗВЛЕЧЕНИЕ СИСТЕМНЫХ ЦВЕТОВ MONET ДЛЯ ДИАЛОГА (БЕЗ SIMPLEX BLUE)
+// MONET COLORS FOR SINGBOX DIALOG
 // =====================================================================
 data class DirectMonetColors(
     val surface: Color,
@@ -249,9 +240,7 @@ data class DirectMonetColors(
 
 @Composable
 fun rememberDirectMonetColors(context: android.content.Context = androidx.compose.ui.platform.LocalContext.current): DirectMonetColors {
-    // Определяем тему: ориентируемся на текущую тему мессенджера
     val isLight = CurrentColors.value.colors.isLight
-    
     return remember(isLight) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (isLight) {
@@ -280,7 +269,6 @@ fun rememberDirectMonetColors(context: android.content.Context = androidx.compos
                 )
             }
         } else {
-            // Фолбек для старых устройств
             if (isLight) {
                 DirectMonetColors(
                     surface = Color.White,
@@ -311,7 +299,7 @@ fun rememberDirectMonetColors(context: android.content.Context = androidx.compos
 }
 
 // =====================================================================
-// КОМПОНЕНТЫ ДИАЛОГОВ SINGBOX НА JETPACK COMPOSE (НАСТОЯЩИЙ MONET)
+// COMPOSE DIALOG COMPONENTS
 // =====================================================================
 @Composable
 fun SingBoxComposeDialogs(activity: MainActivity) {
@@ -320,12 +308,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
     val monet = rememberDirectMonetColors(activity)
     var showCustomInputDialog by remember { mutableStateOf(false) }
 
-    // Основной диалог выбора серверов
     if (!showCustomInputDialog) {
         Dialog(onDismissRequest = { showSingBoxDialogState.value = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = monet.surface, // Настоящий динамический фон
+                color = monet.surface,
                 elevation = 6.dp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -375,15 +362,11 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    // Мягкая акцентная плашка выбранного элемента
-                                    if (isSelected) monet.primaryContainer else Color.Transparent
-                                )
+                                .background(if (isSelected) monet.primaryContainer else Color.Transparent)
                                 .clickable { selectedIndex = index }
                                 .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Динамическая радио-кнопка в системных цветах
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
@@ -395,11 +378,7 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isSelected) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .background(monet.primary, CircleShape)
-                                    )
+                                    Box(modifier = Modifier.size(10.dp).background(monet.primary, CircleShape))
                                 }
                             }
                             Spacer(modifier = Modifier.width(14.dp))
@@ -417,24 +396,22 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Овальные кнопки действий
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Текст-кнопка "Disable":
-TextButton(
-    onClick = { 
-        SingBoxService.stop()
-        ByeDpiBridge.isRunning.value = false // Синхронизируем щит
-        showSingBoxDialogState.value = false 
-    },
-    shape = CircleShape,
-    colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
-) {
-    Text("Disable", fontWeight = FontWeight.SemiBold)
-}
+                        TextButton(
+                            onClick = { 
+                                SingBoxService.stop()
+                                ByeDpiBridge.isRunning.value = false
+                                showSingBoxDialogState.value = false 
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
+                        ) {
+                            Text("Disable", fontWeight = FontWeight.SemiBold)
+                        }
                         Spacer(modifier = Modifier.width(4.dp))
                         TextButton(
                             onClick = { showSingBoxDialogState.value = false },
@@ -444,38 +421,33 @@ TextButton(
                             Text("Cancel", fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        // Кнопка "Turn On" / "Apply":
-Button(
-    onClick = {
-        if (selectedIndex == 4) {
-            showCustomInputDialog = true
-        } else {
-            SingBoxService.setCustomMode(activity, false)
-            SingBoxService.setServerLimit(activity, limits[selectedIndex])
-            if (SingBoxService.isRunning) SingBoxService.restart(activity)
-            else SingBoxService.start(activity)
-            ByeDpiBridge.isRunning.value = true // Синхронизируем щит
-            showSingBoxDialogState.value = false
-        }
-    },
-                            shape = CircleShape, // Овальная Pill-кнопка
+                        Button(
+                            onClick = {
+                                if (selectedIndex == 4) {
+                                    showCustomInputDialog = true
+                                } else {
+                                    SingBoxService.setCustomMode(activity, false)
+                                    SingBoxService.setServerLimit(activity, limits[selectedIndex])
+                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                                    else SingBoxService.start(activity)
+                                    ByeDpiBridge.isRunning.value = true
+                                    showSingBoxDialogState.value = false
+                                }
+                            },
+                            shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
-                                backgroundColor = monet.primary, // Динамический акцент Monet
+                                backgroundColor = monet.primary,
                                 contentColor = monet.onPrimary
                             ),
                             elevation = ButtonDefaults.elevation(0.dp, 0.dp)
                         ) {
-                            Text(
-                                text = if (isRunning) "Apply" else "Turn On",
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Text(if (isRunning) "Apply" else "Turn On", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
             }
         }
     } else {
-        // Диалог ввода ссылки / ключа
         Dialog(onDismissRequest = { showCustomInputDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
@@ -499,7 +471,7 @@ Button(
                     TextField(
                         value = customKey,
                         onValueChange = { customKey = it },
-                        placeholder = { Text("vless://..., awg://... or [Interface]", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
+                        placeholder = { Text("vless://... or http://...", color = monet.onSurfaceVariant.copy(alpha = 0.6f)) },
                         colors = TextFieldDefaults.textFieldColors(
                             textColor = monet.onSurface,
                             placeholderColor = monet.onSurfaceVariant.copy(alpha = 0.6f),
@@ -532,18 +504,18 @@ Button(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
-    onClick = {
-        val key = customKey.trim()
-        if (key.isNotEmpty()) {
-            SingBoxService.setCustomMode(activity, true)
-            SingBoxService.setCustomKey(activity, key)
-            if (SingBoxService.isRunning) SingBoxService.restart(activity)
-            else SingBoxService.start(activity)
-            ByeDpiBridge.isRunning.value = true // Синхронизируем щит
-            showCustomInputDialog = false
-            showSingBoxDialogState.value = false
-        }
-    },
+                            onClick = {
+                                val key = customKey.trim()
+                                if (key.isNotEmpty()) {
+                                    SingBoxService.setCustomMode(activity, true)
+                                    SingBoxService.setCustomKey(activity, key)
+                                    if (SingBoxService.isRunning) SingBoxService.restart(activity)
+                                    else SingBoxService.start(activity)
+                                    ByeDpiBridge.isRunning.value = true
+                                    showCustomInputDialog = false
+                                    showSingBoxDialogState.value = false
+                                }
+                            },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 backgroundColor = monet.primary,
@@ -561,26 +533,26 @@ Button(
 }
 
 // =====================================================================
-// ИНТЕНТЫ СТАНДАРТНОГО APP
+// APP INTENTS
 // =====================================================================
 fun processNotificationIntent(intent: Intent?) {
   val userId = getUserIdFromIntent(intent)
   when (intent?.action) {
     NtfManager.OpenChatAction -> {
       val chatId = intent.getStringExtra("chatId")
-      Log.d(TAG, "processNotificationIntent: OpenChatAction $chatId")
+      Log.d("MainActivity", "processNotificationIntent: OpenChatAction $chatId")
       if (chatId != null) {
         ntfManager.openChatAction(userId, chatId)
       }
     }
     NtfManager.ShowChatsAction -> {
-      Log.d(TAG, "processNotificationIntent: ShowChatsAction")
+      Log.d("MainActivity", "processNotificationIntent: ShowChatsAction")
       ntfManager.showChatsAction(userId)
     }
     NtfManager.AcceptCallAction -> {
       val chatId = intent.getStringExtra("chatId")
       if (chatId == null || chatId == "") return
-      Log.d(TAG, "processNotificationIntent: AcceptCallAction $chatId")
+      Log.d("MainActivity", "processNotificationIntent: AcceptCallAction $chatId")
       ntfManager.acceptCallAction(chatId)
     }
   }
