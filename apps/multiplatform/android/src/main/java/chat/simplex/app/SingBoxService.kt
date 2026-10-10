@@ -23,7 +23,7 @@ object SingBoxService {
   private var process: Process? = null
 
   private val SUBSCRIPTION_URLS = listOf(
-    "https://github.com/Au1rxx/free-vpn-subscriptions/raw/main/output/singbox.json",
+    "https://cdn.jsdelivr.net/gh/Au1rxx/free-vpn-subscriptions@main/output/singbox.json",
     "https://cdn.jsdelivr.net/gh/awesome-vpn/awesome-vpn@master/sing-box.json",
     "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/singbox.json"
   )
@@ -133,7 +133,7 @@ object SingBoxService {
         }
 
         var portOpen = false
-        for (i in 0 until 25) {
+        for (i in 0 until 30) {
           Thread.sleep(300)
           try {
             Socket().use { s ->
@@ -190,16 +190,12 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
+    // Системный DNS устройства - не блокируется оператором
     val dns = JSONObject().apply {
       val servers = JSONArray().apply {
         put(JSONObject().apply {
-          put("tag", "quad9-doh")
-          put("address", "https://9.9.9.9/dns-query")
-          put("detour", "direct")
-        })
-        put(JSONObject().apply {
-          put("tag", "google-doh")
-          put("address", "https://8.8.8.8/dns-query")
+          put("tag", "local-dns")
+          put("address", "local")
           put("detour", "direct")
         })
       }
@@ -213,12 +209,11 @@ object SingBoxService {
 
     if (isCustomMode(context) && getCustomKey(context).isNotBlank()) {
       try {
-        val customOutbound = resolveCustomOutbound(getCustomKey(context))
-        if (customOutbound != null) {
-          cleanOutbounds.put(customOutbound)
-          targetTag = customOutbound.optString("tag", "custom-proxy")
+        val customOutbounds = resolveCustomOutbounds(getCustomKey(context))
+        if (customOutbounds.isNotEmpty()) {
+          targetTag = registerOutboundsWithUrlTest(cleanOutbounds, customOutbounds, context)
         } else {
-          throw IllegalArgumentException("Unsupported configuration format. Supported: VLESS or Subscription URL.")
+          throw IllegalArgumentException("No valid VLESS servers found in custom configuration")
         }
       } catch (e: Exception) {
         throw IllegalArgumentException("Failed: ${e.message ?: "Invalid configuration"}")
@@ -238,46 +233,29 @@ object SingBoxService {
       }
 
       if (rawJson.isNullOrBlank()) {
-        if (configFile.exists()) return configFile
+        if (configFile.exists() && configFile.length() > 50) return configFile
         throw IllegalStateException("Failed to download subscription")
       }
 
       val sourceRoot = JSONObject(rawJson)
       val sourceOutbounds = sourceRoot.optJSONArray("outbounds") ?: JSONArray()
-      val candidateOutbounds = mutableListOf<JSONObject>()
+      val vlessOutbounds = mutableListOf<JSONObject>()
+      val otherOutbounds = mutableListOf<JSONObject>()
 
       for (i in 0 until sourceOutbounds.length()) {
         val ob = sourceOutbounds.getJSONObject(i)
         val type = ob.optString("type")
         if (type == "direct" || type == "block" || type == "dns" || type == "urltest" || type == "selector") continue
-        candidateOutbounds.add(ob)
-      }
-
-      val limit = getServerLimit(context)
-      val selectedOutbounds = if (limit in 1 until candidateOutbounds.size) {
-        candidateOutbounds.shuffled().take(limit)
-      } else {
-        candidateOutbounds
-      }
-
-      val proxyTags = JSONArray()
-      for (ob in selectedOutbounds) {
-        cleanOutbounds.put(ob)
-        proxyTags.put(ob.optString("tag"))
-      }
-
-      if (proxyTags.length() > 0) {
-        val urlTestGroup = JSONObject().apply {
-          put("type", "urltest")
-          put("tag", "auto")
-          put("outbounds", proxyTags)
-          put("url", "https://www.gstatic.com/generate_204")
-          put("interval", "2m")
-          put("tolerance", 50)
+        if (type.equals("vless", ignoreCase = true)) {
+          vlessOutbounds.add(ob)
+        } else {
+          otherOutbounds.add(ob)
         }
-        cleanOutbounds.put(urlTestGroup)
-        targetTag = "auto"
       }
+
+      // Приоритет отдаем VLESS-серверам
+      val candidateOutbounds = if (vlessOutbounds.isNotEmpty()) vlessOutbounds else otherOutbounds
+      targetTag = registerOutboundsWithUrlTest(cleanOutbounds, candidateOutbounds, context)
     }
 
     cleanOutbounds.put(JSONObject().apply {
@@ -303,7 +281,53 @@ object SingBoxService {
     return configFile
   }
 
-  private fun resolveCustomOutbound(rawInput: String): JSONObject? {
+  // Сборка группы urltest с гарантированно уникальными тегами для исключения падений
+  private fun registerOutboundsWithUrlTest(
+    cleanOutbounds: JSONArray,
+    rawOutbounds: List<JSONObject>,
+    context: Context
+  ): String {
+    val limit = getServerLimit(context)
+    val selected = if (limit in 1 until rawOutbounds.size) {
+      rawOutbounds.shuffled().take(limit)
+    } else {
+      rawOutbounds
+    }
+
+    val usedTags = mutableSetOf<String>()
+    val proxyTags = JSONArray()
+
+    for ((index, ob) in selected.withIndex()) {
+      var tag = ob.optString("tag").ifBlank { "proxy" }
+      if (usedTags.contains(tag) || tag == "direct" || tag == "auto") {
+        tag = "${tag}_$index"
+      }
+      usedTags.add(tag)
+      ob.put("tag", tag)
+
+      cleanOutbounds.put(ob)
+      proxyTags.put(tag)
+    }
+
+    return if (proxyTags.length() > 1) {
+      val urlTestGroup = JSONObject().apply {
+        put("type", "urltest")
+        put("tag", "auto")
+        put("outbounds", proxyTags)
+        put("url", "https://www.gstatic.com/generate_204")
+        put("interval", "1m")
+        put("tolerance", 50)
+      }
+      cleanOutbounds.put(urlTestGroup)
+      "auto"
+    } else if (proxyTags.length() == 1) {
+      proxyTags.getString(0)
+    } else {
+      "direct"
+    }
+  }
+
+  private fun resolveCustomOutbounds(rawInput: String): List<JSONObject> {
     var input = rawInput.trim().removeSurrounding("\"").removeSurrounding("'")
 
     try {
@@ -330,12 +354,32 @@ object SingBoxService {
       input
     }
 
-    val vlessLine = content.lines().firstOrNull { it.trim().startsWith("vless://", ignoreCase = true) }?.trim()
-    if (vlessLine != null) {
-      return parseVlessUri(vlessLine)
+    val results = mutableListOf<JSONObject>()
+
+    // Если передан JSON со списком outbounds
+    if (content.startsWith("{") && content.contains("\"outbounds\"")) {
+      try {
+        val json = JSONObject(content)
+        val outbounds = json.optJSONArray("outbounds") ?: JSONArray()
+        for (i in 0 until outbounds.length()) {
+          val ob = outbounds.getJSONObject(i)
+          val type = ob.optString("type")
+          if (type == "direct" || type == "block" || type == "dns" || type == "urltest" || type == "selector") continue
+          results.add(ob)
+        }
+        if (results.isNotEmpty()) return results
+      } catch (_: Exception) {}
     }
 
-    return parseVlessUri(content)
+    // Парсим все строки vless://
+    for (line in content.lines()) {
+      val trimmed = line.trim()
+      if (trimmed.startsWith("vless://", ignoreCase = true)) {
+        parseVlessUri(trimmed)?.let { results.add(it) }
+      }
+    }
+
+    return results
   }
 
   private fun parseVlessUri(vlessUri: String): JSONObject? {
@@ -353,7 +397,7 @@ object SingBoxService {
       val pbk = uri.getQueryParameter("pbk").orEmpty()
       val sid = uri.getQueryParameter("sid").orEmpty()
       val fp = uri.getQueryParameter("fp") ?: "chrome"
-      val tag = uri.fragment?.takeIf { it.isNotBlank() } ?: "custom-proxy"
+      val tag = uri.fragment?.takeIf { it.isNotBlank() } ?: "vless-proxy"
 
       JSONObject().apply {
         put("type", "vless")
