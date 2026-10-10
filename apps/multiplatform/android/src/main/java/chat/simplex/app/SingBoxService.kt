@@ -155,7 +155,6 @@ object SingBoxService {
             ByeDpiBridge.isRunning.value = true
           }
 
-          // Проверка реального трафика через HTTPS (исключает ошибку Cleartext HTTP)
           var checkSuccess = false
           var checkError = ""
           try {
@@ -227,30 +226,6 @@ object SingBoxService {
     }
     root.put("inbounds", JSONArray().apply { put(socksInbound) })
 
-    // В блоке prepareConfig(context):
-    
-    // 1. Настройка DNS с резолвом через сам прокси-туннель
-    val dns = JSONObject().apply {
-      val servers = JSONArray().apply {
-        // Зашифрованный DoH, который идёт ЧЕРЕЗ прокси-туннель (никаких утечек)
-        put(JSONObject().apply {
-          put("tag", "remote-dns")
-          put("address", "https://1.1.1.1/dns-query")
-          put("detour", targetTag) // Трафик DNS уходит внутрь VLESS
-        })
-        // Прямой DNS только для резолва домена самого VLESS-сервера (bootstrap)
-        put(JSONObject().apply {
-          put("tag", "bootstrap-dns")
-          put("address", "8.8.8.8")
-          put("detour", "direct")
-        })
-      }
-      put("servers", servers)
-      put("final", "remote-dns")
-      put("strategy", "prefer_ipv4")
-    }
-    root.put("dns", dns)
-    
     val cleanOutbounds = JSONArray()
     var targetTag = "direct"
 
@@ -308,17 +283,41 @@ object SingBoxService {
       put("type", "direct")
       put("tag", "direct")
     })
+    cleanOutbounds.put(JSONObject().apply {
+      put("type", "dns")
+      put("tag", "dns-out")
+    })
 
     root.put("outbounds", cleanOutbounds)
 
+    // Конфигурация DNS инициализируется строго после определения targetTag
+    val dns = JSONObject().apply {
+      val servers = JSONArray().apply {
+        if (targetTag != "direct") {
+          put(JSONObject().apply {
+            put("tag", "remote-dns")
+            put("address", "https://1.1.1.1/dns-query")
+            put("detour", targetTag)
+          })
+        }
+        put(JSONObject().apply {
+          put("tag", "bootstrap-dns")
+          put("address", "8.8.8.8")
+          put("detour", "direct")
+        })
+      }
+      put("servers", servers)
+      put("final", if (targetTag != "direct") "remote-dns" else "bootstrap-dns")
+      put("strategy", "prefer_ipv4")
+    }
+    root.put("dns", dns)
+
     val route = JSONObject().apply {
       val rules = JSONArray().apply {
-        // DNS-запросы направляем во встроенный DNS-движок Sing-box
         put(JSONObject().apply {
           put("protocol", "dns")
           put("outbound", "dns-out")
         })
-        // Весь входящий SOCKS-трафик от SimpleX отправляем в рабочий VLESS
         put(JSONObject().apply {
           put("inbound", JSONArray().apply { put("socks-in") })
           put("outbound", targetTag)
@@ -328,12 +327,6 @@ object SingBoxService {
       put("final", "direct")
     }
     root.put("route", route)
-
-    // Добавляем обязательный системный outbound для перехвата DNS
-    cleanOutbounds.put(JSONObject().apply {
-      put("type", "dns")
-      put("tag", "dns-out")
-    })
 
     configFile.writeText(root.toString(2))
     return configFile
