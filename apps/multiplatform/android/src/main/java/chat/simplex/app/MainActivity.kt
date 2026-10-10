@@ -405,6 +405,9 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                 SingBoxService.stop()
                 chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = false
                 showSingBoxDialogState.value = false 
+                try {
+                  ChatModel.controller.reconnectRemoteHosts()
+                } catch (_: Throwable) {}
               },
               shape = CircleShape,
               colors = ButtonDefaults.textButtonColors(contentColor = monet.primary)
@@ -431,6 +434,9 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                   else SingBoxService.start(activity)
                   chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = true
                   showSingBoxDialogState.value = false
+                  try {
+                    ChatModel.controller.reconnectRemoteHosts()
+                  } catch (_: Throwable) {}
                 }
               },
               shape = CircleShape,
@@ -513,6 +519,9 @@ fun SingBoxComposeDialogs(activity: MainActivity) {
                   chat.simplex.common.views.chatlist.ByeDpiBridge.isRunning.value = true
                   showCustomInputDialog = false
                   showSingBoxDialogState.value = false
+                  try {
+                    ChatModel.controller.reconnectRemoteHosts()
+                  } catch (_: Throwable) {}
                 }
               },
               shape = CircleShape,
