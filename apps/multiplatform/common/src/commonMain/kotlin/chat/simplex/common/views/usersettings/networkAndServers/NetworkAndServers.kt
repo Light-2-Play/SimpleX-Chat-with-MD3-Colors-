@@ -385,9 +385,9 @@ fun SocksProxySettings(
   val portUnsaved = rememberSaveable(stateSaver = TextFieldValue.Saver) {
     mutableStateOf(TextFieldValue(networkProxySaved.port.toString()))
   }
-  val proxyAuthRandomUnsaved = rememberSaveable { 
-  mutableStateOf(if (networkProxySaved.host == "127.0.0.1" && networkProxySaved.port == 20808 && networkProxySaved.username.isEmpty()) false else networkProxySaved.auth == NetworkProxyAuth.ISOLATE) 
-}
+  val proxyAuthRandomUnsaved = rememberSaveable {
+    mutableStateOf(if (networkProxySaved.host == "127.0.0.1" && networkProxySaved.port == 20808 && networkProxySaved.username.isEmpty()) false else networkProxySaved.auth == NetworkProxyAuth.ISOLATE)
+  }
   LaunchedEffect(proxyAuthRandomUnsaved.value) {
     if (!proxyAuthRandomUnsaved.value && onionHosts.value != OnionHosts.NEVER) {
       onionHosts.value = OnionHosts.NEVER
@@ -457,7 +457,10 @@ fun SocksProxySettings(
         !validCredential(passwordUnsaved.value.text) ||
         !validHost(hostUnsaved.value.text) ||
         !validPort(portUnsaved.value.text)
-val resetDisabled = hostUnsaved.value.text.trim() == "127.0.0.1" && portUnsaved.value.text.trim() == "20808" && !proxyAuthRandomUnsaved.value && onionHosts.value == OnionHosts.NEVER ModalView(
+
+  val resetDisabled = hostUnsaved.value.text.trim() == "127.0.0.1" && portUnsaved.value.text.trim() == "20808" && !proxyAuthRandomUnsaved.value && onionHosts.value == OnionHosts.NEVER
+
+  ModalView(
     close = {
       if (saveDisabled) {
         close()
@@ -534,13 +537,13 @@ val resetDisabled = hostUnsaved.value.text.trim() == "127.0.0.1" && portUnsaved.
 
       SectionView {
         SectionItemView({
-  hostUnsaved.value = hostUnsaved.value.copy("127.0.0.1", TextRange(9))
-  portUnsaved.value = portUnsaved.value.copy("20808", TextRange(5))
-  usernameUnsaved.value = TextFieldValue()
-  passwordUnsaved.value = TextFieldValue()
-  proxyAuthRandomUnsaved.value = false
-  onionHosts.value = OnionHosts.NEVER
-}, disabled = resetDisabled) {
+          hostUnsaved.value = hostUnsaved.value.copy("127.0.0.1", TextRange(9))
+          portUnsaved.value = portUnsaved.value.copy("20808", TextRange(5))
+          usernameUnsaved.value = TextFieldValue()
+          passwordUnsaved.value = TextFieldValue()
+          proxyAuthRandomUnsaved.value = false
+          onionHosts.value = OnionHosts.NEVER
+        }, disabled = resetDisabled) {
           Text(stringResource(MR.strings.network_options_reset_to_defaults), color = if (resetDisabled) MaterialTheme.colors.secondary else MaterialTheme.colors.primary)
         }
         SectionItemView(
