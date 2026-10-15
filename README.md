@@ -2,6 +2,14 @@ SimpleX FLEX is my fork of SimpleX Chat.
 This fork have a Material You colors, Video Messages 1:1, Transcription Voice Messages and In-App VPN.
 I'm not a offical developer of SimpleX Team.
 
+For use In-App VPN
+You need: 
+ Go Settings --> Network & Servers --> Socks Proxy settings --> Reset to Defaults.
+
+After this, you can just turn on SOCKS Proxy 
+And after you can turn on VLESS Shield
+(VLESS Proxy) in Main Screen.
+
 Screenshots: <img width="1152" height="2496" alt="Screenshot_20261015-103019" src="https://github.com/user-attachments/assets/58f20b2b-3298-4781-98c2-993a7c2e3688" />
 
 -----
